@@ -13,9 +13,10 @@ defmodule MPEG.TS.PartialPES do
           stream_id: pos_integer(),
           pts: pos_integer(),
           dts: pos_integer(),
-          is_aligned: boolean()
+          is_aligned: boolean(),
+          discontinuity: boolean()
         }
-  defstruct [:data, :stream_id, :pts, :dts, :is_aligned]
+  defstruct [:data, :stream_id, :pts, :dts, :is_aligned, :discontinuity]
 
   require Logger
 
@@ -33,7 +34,10 @@ defmodule MPEG.TS.PartialPES do
   end
 
   @impl true
-  def unmarshal(<<1::24, stream_id::8, _packet_length::16, optional_fields::bitstring>>, true) do
+  def unmarshal(
+        <<1::24, stream_id::8, _packet_length::16, optional_fields::bitstring>>,
+        true
+      ) do
     # Packet length is ignored as the field is also allowed to be zero in case
     # the payload is a video elementary stream. If the PES packet length is set
     # to zero, the PES packet can be of any length.
@@ -154,7 +158,7 @@ defmodule MPEG.TS.PartialPES do
 
     if pts - dts > 60 * @ts_clock_hz do
       # https://github.com/video-dev/hls.js/blob/c14628668e04d14f0217d0118f7e768933524c6d/src/demux/tsdemuxer.ts#L1106
-      Logger.warn(
+      Logger.warning(
         "#{round((pts - dts) / @ts_clock_hz)} delta between PTS and DTS. Aligning them using DTS."
       )
 

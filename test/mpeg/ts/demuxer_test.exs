@@ -66,6 +66,24 @@ defmodule MPEG.TS.DemuxerTest do
     assert state_from_bytes == state_from_packets
   end
 
+  test "sets discontinuity flag in PES" do
+    bytes =
+      @all_packets_path
+      |> File.read!()
+
+    state =
+      Demuxer.new()
+      |> Demuxer.push_buffer(bytes, true)
+
+    assert {packets, state} = Demuxer.take(state, 256, 6)
+    assert Enum.all?(packets, & &1.discontinuity)
+
+    state = Demuxer.push_buffer(state, bytes)
+    assert {[%PES{discontinuity: true}], state} = Demuxer.take(state, 256, 1)
+    assert {packets, _state} = Demuxer.take(state, 256, 5)
+    assert Enum.all?(packets, &(&1.discontinuity == false))
+  end
+
   test "works with partial data" do
     one_shot =
       Demuxer.new()
