@@ -121,7 +121,7 @@ defmodule MPEG.TS.Demuxer do
     else
       Logger.debug("Random access indicator found", domain: __MODULE__)
 
-      packets = Enum.slice(packets, Range.new(rai, -1))
+      packets = Enum.slice(packets, Range.new(rai, -1, 1))
       push_es_packets(%{state | waiting_random_access_indicator: false}, packets)
     end
   end
