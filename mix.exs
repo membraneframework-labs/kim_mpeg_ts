@@ -3,7 +3,7 @@ defmodule MPEG.TS.MixProject do
 
   def project do
     [
-      app: :kim_mpeg_ts,
+      app: :mpeg_ts,
       version: "1.0.1",
       elixir: "~> 1.14",
       elixirc_paths: elixirc_paths(Mix.env()),

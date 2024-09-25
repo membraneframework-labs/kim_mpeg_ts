@@ -1,4 +1,6 @@
 # MPEG.TS
+![Hex.pm Version](https://img.shields.io/hexpm/v/mpeg_ts)
+
 MPEG Transport Stream (TS) library. Deserializes packets and demuxes them (no
 serializer nor muxer).
 
