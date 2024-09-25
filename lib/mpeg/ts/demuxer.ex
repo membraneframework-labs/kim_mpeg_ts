@@ -35,7 +35,6 @@ defmodule MPEG.TS.Demuxer do
         %{ts | discontinuity: discontinuity}
       end)
 
-    if bytes_to_buffer != <<>>, do: Logger.debug("buffered: #{byte_size(bytes_to_buffer)} bytes")
     state = push_packets(%__MODULE__{state | buffered_bytes: <<>>}, ok)
     %__MODULE__{state | buffered_bytes: bytes_to_buffer}
   end
