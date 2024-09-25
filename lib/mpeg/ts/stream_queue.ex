@@ -17,7 +17,7 @@ defmodule MPEG.TS.StreamQueue do
     %__MODULE__{
       stream_id: stream_id,
       partials: [],
-      ready: Q.new("ts-ready-#{stream_id}")
+      ready: :queue.new()
     }
   end
 
@@ -49,7 +49,7 @@ defmodule MPEG.TS.StreamQueue do
       |> Enum.map(&reduce_pes_packet(&1))
       |> Enum.filter(fn x -> x != nil end)
 
-    ready = Enum.reduce(pes_packets, ready, fn p, q -> Q.push(q, p) end)
+    ready = Enum.reduce(pes_packets, ready, fn p, q -> :queue.in(p, q) end)
 
     %__MODULE__{state | partials: partials, ready: ready}
   end
@@ -60,7 +60,7 @@ defmodule MPEG.TS.StreamQueue do
       |> reduce_pes_packet()
       |> List.wrap()
       |> Enum.filter(fn x -> x != nil end)
-      |> Enum.reduce(ready, fn p, q -> Q.push(q, p) end)
+      |> Enum.reduce(ready, fn p, q -> :queue.in(p, q) end)
 
     %__MODULE__{state | partials: [], ready: ready}
   end
@@ -75,7 +75,7 @@ defmodule MPEG.TS.StreamQueue do
   end
 
   defp take_from_queue(queue, n, items) do
-    case Q.pop(queue) do
+    case :queue.out(queue) do
       {:empty, queue} ->
         take_from_queue(queue, 0, items)
 
