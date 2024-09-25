@@ -19,14 +19,6 @@ defmodule MPEG.TS.MixProject do
     """
     MPEG Transport Stream (TS) library. Deserializes packets and demuxes them (no
     serializer nor muxer).
-
-    This library is the base of our [MPEG.TS plugin for the Membrane
-    Framework](https://github.com/kim-company/membrane_mpeg_ts_plugin) which is
-    being battle-tested with production workloads. Checkout its code and the tests
-    for some usage examples.
-
-    Initial table/packet parsing code was copied verbatim from
-    https://github.com/membraneframework/membrane_mpegts_plugin.
     """
   end
 
