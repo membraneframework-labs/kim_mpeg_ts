@@ -5,12 +5,14 @@ defmodule MPEG.TS.Demuxer do
   """
   alias MPEG.TS.Packet
   alias MPEG.TS.PMT
+  alias MPEG.TS.PAT
   alias MPEG.TS.StreamQueue
 
   require Logger
 
   @type t :: %__MODULE__{
           pmt: PMT.t() | nil,
+          pat: PAT.t() | nil,
           demuxed_queues: %{required(PMT.stream_id_t()) => StreamBuffer.t()},
           packet_filter: (PMT.stream_id_t() -> boolean()),
           buffered_bytes: binary()
@@ -19,6 +21,7 @@ defmodule MPEG.TS.Demuxer do
   defstruct [
     :pmt,
     :packet_filter,
+    pat: %{},
     demuxed_queues: %{},
     buffered_bytes: <<>>,
     waiting_random_access_indicator: true
@@ -44,14 +47,19 @@ defmodule MPEG.TS.Demuxer do
   end
 
   def push_packets(state, packets) do
-    {pmt_packets, other_packets} =
+    {pat_packets, packets} = Enum.split_with(packets, fn x -> x.pid_class == :pat end)
+
+    state = push_pat_packets(state, pat_packets)
+    pid_with_pmt = Map.values(state.pat)
+
+    {pmt_packets, packets} =
       Enum.split_with(packets, fn x ->
-        PMT.is_unmarshable?(x.payload, x.pusi)
+        x.pid in pid_with_pmt
       end)
 
     state
     |> push_pmt_packets(pmt_packets)
-    |> push_es_packets(other_packets)
+    |> push_es_packets(packets)
   end
 
   def end_of_stream(state = %__MODULE__{demuxed_queues: queues}) do
@@ -79,6 +87,25 @@ defmodule MPEG.TS.Demuxer do
       nil -> 0
       %StreamQueue{ready: q} -> :queue.len(q)
     end
+  end
+
+  defp push_pat_packets(state, pat_packets) do
+    pat =
+      pat_packets
+      |> Enum.map(fn x ->
+        case PAT.unmarshal(x.payload, x.pusi) do
+          {:ok, table} ->
+            table
+
+          {:error, reason} ->
+            raise ArgumentError,
+                  "PAT did not manage to unmarshal packet: #{inspect(x)}, reason: #{inspect(reason)}"
+        end
+      end)
+      |> Enum.reduce(state.pat, fn new, old -> Map.merge(old, new) end)
+
+    state
+    |> put_in([Access.key!(:pat)], pat)
   end
 
   defp push_pmt_packets(state, pmt_packets) do

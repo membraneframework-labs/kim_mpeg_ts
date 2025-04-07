@@ -18,6 +18,7 @@ defmodule MPEG.TS.Packet do
           # payload unit start indicator
           pusi: boolean(),
           pid: pid_t(),
+          pid_class: pid_class_t(),
           continuity_counter: binary(),
           scrambling: scrambling_t(),
           discontinuity_indicator: boolean(),
@@ -28,6 +29,7 @@ defmodule MPEG.TS.Packet do
   @derive {Inspect,
            only: [
              :pid,
+             :pid_class,
              :pusi,
              :continuity_counter,
              :discontinuity_indicator,
@@ -39,6 +41,7 @@ defmodule MPEG.TS.Packet do
     :payload,
     :pusi,
     :pid,
+    :pid_class,
     :continuity_counter,
     :scrambling,
     :discontinuity_indicator,
@@ -74,6 +77,7 @@ defmodule MPEG.TS.Packet do
         %__MODULE__{
           pusi: pusi,
           pid: pid,
+          pid_class: pid_class,
           payload: data,
           scrambling: scrambling,
           continuity_counter: continuity_counter,
@@ -171,6 +175,9 @@ defmodule MPEG.TS.Packet do
   end
 
   defp parse_payload(payload, :payload, :psi), do: {:ok, %{}, payload}
+
+  # <<table_id::8, 1::1, 0::1, 3::2, 0::2, section_length::10, table_id_ext::16, 3::2,
+  #   version::5, active::1, section::8, last_section::8, rest::bitstring>>,
   defp parse_payload(payload, :payload, :pat), do: {:ok, %{}, payload}
   defp parse_payload(_, _, _), do: {:error, :unsupported_packet}
 

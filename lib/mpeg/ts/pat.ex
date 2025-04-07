@@ -1,4 +1,6 @@
 defmodule MPEG.TS.PAT do
+  alias MPEG.TS.PSI
+
   @moduledoc """
   Program Association Table.
   """
@@ -8,6 +10,13 @@ defmodule MPEG.TS.PAT do
   @type t :: %{required(program_id_t()) => program_pid_t()}
 
   @entry_length 4
+
+  def unmarshal(data, is_start_unit) do
+    with {:ok, %PSI{table: table}} <- PSI.unmarshal(data, is_start_unit),
+         {:ok, table} <- unmarshal_table(table) do
+      {:ok, table}
+    end
+  end
 
   # Unmarshals Program Association Table data. Each entry should be 4 bytes
   # long. If provided data length is not divisible by entry length an error
