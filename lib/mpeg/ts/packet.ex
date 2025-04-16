@@ -169,7 +169,8 @@ defmodule MPEG.TS.Packet do
          pid
        ) do
     with {:ok, %{}, payload} <- parse_payload(payload, :payload, pid),
-         {:ok, adaptation} <- parse_adaptation_field(adaptation_field) do
+         {:ok, adaptation} <-
+           parse_adaptation_field(adaptation_field) do
       {:ok, adaptation, payload}
     end
   end

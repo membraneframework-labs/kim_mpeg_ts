@@ -6,63 +6,63 @@ defmodule MPEG.TS.StreamQueue do
   PartialPES depayloader.
   """
 
-  alias MPEG.TS.Packet
   alias MPEG.TS.PartialPES
   alias MPEG.TS.PES
 
-  @derive Inspect
-  defstruct [:stream_id, :partials, :ready]
+  require Logger
 
-  def new(stream_id) do
+  @derive Inspect
+  defstruct [:pid, :acc, :ready]
+
+  def new(pid) do
     %__MODULE__{
-      stream_id: stream_id,
-      partials: [],
+      pid: pid,
+      acc: :queue.new(),
       ready: :queue.new()
     }
   end
 
-  def push_es_packets(state = %__MODULE__{partials: partials, ready: ready}, packets) do
-    {complete_chunks, [partials]} =
-      partials
-      |> Enum.concat(packets)
-      |> Enum.map(fn x = %Packet{pid: pid} ->
-        if pid != state.stream_id do
-          raise ArgumentError,
-                "#{inspect(state)} received a packet belonging to stream #{inspect(pid)}"
+  def push_es_packets(state, packets) do
+    {ready, acc} =
+      Enum.reduce(packets, {state.ready, state.acc}, fn packet, {ready, acc} ->
+        unit = unmarshal_partial_pes!(packet)
+
+        cond do
+          packet.pusi ->
+            ready =
+              acc
+              |> :queue.to_list()
+              |> depayload()
+              |> Enum.reduce(ready, fn pes, ready ->
+                :queue.in(pes, ready)
+              end)
+
+            {ready, :queue.from_list([unit])}
+
+          not :queue.is_empty(acc) ->
+            {ready, :queue.in(unit, acc)}
+
+          true ->
+            Logger.warning("Invalid PES, not a pusi. Skipping.")
+            {ready, acc}
         end
-
-        x
       end)
-      |> Enum.reduce([], fn
-        x = %Packet{pusi: true}, acc ->
-          [[x] | acc]
 
-        x = %Packet{pusi: false}, [head | rest] ->
-          [[x | head] | rest]
-      end)
-      |> Enum.reverse()
-      |> Enum.map(&Enum.reverse/1)
-      |> Enum.split(-1)
-
-    pes_packets =
-      complete_chunks
-      |> Enum.map(&reduce_pes_packet(&1))
-      |> Enum.filter(fn x -> x != nil end)
-
-    ready = Enum.reduce(pes_packets, ready, fn p, q -> :queue.in(p, q) end)
-
-    %__MODULE__{state | partials: partials, ready: ready}
+    state
+    |> put_in([Access.key!(:acc)], acc)
+    |> put_in([Access.key!(:ready)], ready)
   end
 
-  def end_of_stream(state = %__MODULE__{partials: partials, ready: ready}) do
+  def end_of_stream(state = %__MODULE__{acc: acc, ready: ready}) do
     ready =
-      partials
-      |> reduce_pes_packet()
-      |> List.wrap()
-      |> Enum.filter(fn x -> x != nil end)
-      |> Enum.reduce(ready, fn p, q -> :queue.in(p, q) end)
+      acc
+      |> :queue.to_list()
+      |> depayload()
+      |> Enum.reduce(ready, fn pes, ready ->
+        :queue.in(pes, ready)
+      end)
 
-    %__MODULE__{state | partials: [], ready: ready}
+    %__MODULE__{state | acc: :queue.new(), ready: ready}
   end
 
   def take(state = %__MODULE__{ready: queue}, amount) do
@@ -84,31 +84,64 @@ defmodule MPEG.TS.StreamQueue do
     end
   end
 
-  defp reduce_pes_packet(packets) do
-    packets =
+  defp depayload([]) do
+    []
+  end
+
+  defp depayload(packets = [leader | _]) do
+    stream_ids =
       packets
-      |> Enum.filter(fn x -> PartialPES.is_unmarshable?(x.payload, x.pusi) end)
-      |> Enum.map(fn x -> unmarshal_partial_pes!(x) end)
+      |> Enum.map(fn x -> x.stream_id end)
+      |> Enum.uniq()
+      |> Enum.reject(&is_nil/1)
 
-    leader = List.first(packets)
+    payload =
+      packets
+      |> Enum.map(fn x -> x.data end)
+      |> Enum.join(<<>>)
 
-    if leader != nil do
-      data =
-        packets
-        |> Enum.map(fn %PartialPES{data: data} -> data end)
-        |> Enum.join()
+    payload_size = byte_size(payload)
 
-      %PES{
-        data: data,
+    payload =
+      cond do
+        length(stream_ids) != 1 ->
+          Logger.warning(
+            "The collected partial PES contains an invalid set of stream_ids (#{inspect(stream_ids)}). Skipping"
+          )
+
+          nil
+
+        leader.length == 0 ->
+          # TODO: trim trailing stuffing bits? Seems to make no difference and its a
+          # quite expensive process.
+          payload
+
+        payload_size > leader.length ->
+          <<payload::binary-size(leader.length)-unit(8), _rest::binary>> = payload
+          payload
+
+        payload_size == leader.length ->
+          payload
+
+        true ->
+          Logger.warning(
+            "Invalid PES, size mismatch (have=#{payload_size}, want=#{leader.length}). Skipping."
+          )
+
+          nil
+      end
+
+    if is_nil(payload) do
+      []
+    else
+      List.wrap(%PES{
+        data: payload,
         stream_id: leader.stream_id,
         pts: leader.pts,
         dts: leader.dts,
-        # the information about alignment should be available in the first `PartialPES`
         is_aligned: leader.is_aligned,
         discontinuity: leader.discontinuity
-      }
-    else
-      nil
+      })
     end
   end
 

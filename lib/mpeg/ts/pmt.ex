@@ -50,7 +50,8 @@ defmodule MPEG.TS.PMT do
         _reserved::3,
         pcr_pid::13,
         _reserved2::4,
-        program_info_length::12,
+        _::2,
+        program_info_length::10,
         rest::binary
       >>) do
     with {:ok, {program_info, rest}} <- parse_program_info(program_info_length, rest),

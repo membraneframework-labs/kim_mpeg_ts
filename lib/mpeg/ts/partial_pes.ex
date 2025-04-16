@@ -14,9 +14,10 @@ defmodule MPEG.TS.PartialPES do
           pts: pos_integer(),
           dts: pos_integer(),
           is_aligned: boolean(),
+          length: pos_integer(),
           discontinuity: boolean()
         }
-  defstruct [:data, :stream_id, :pts, :dts, :is_aligned, :discontinuity]
+  defstruct [:data, :stream_id, :pts, :dts, :is_aligned, :discontinuity, :length]
 
   require Logger
 
@@ -35,20 +36,18 @@ defmodule MPEG.TS.PartialPES do
 
   @impl true
   def unmarshal(
-        <<1::24, stream_id::8, _packet_length::16, optional_fields::bitstring>>,
+        <<1::24, stream_id::8, packet_length::16, optional_fields::binary>>,
         true
       ) do
-    # Packet length is ignored as the field is also allowed to be zero in case
-    # the payload is a video elementary stream. If the PES packet length is set
-    # to zero, the PES packet can be of any length.
-
-    with {:ok, optional, payload} <- parse_optional(optional_fields, has_header?(stream_id)) do
+    with {:ok, optional, header_size, payload} <-
+           parse_optional_header(optional_fields, has_header?(stream_id)) do
       {:ok,
        %__MODULE__{
          data: payload,
          stream_id: stream_id,
          dts: Map.get(optional, :dts),
          pts: Map.get(optional, :pts),
+         length: if(packet_length > 0, do: packet_length - header_size, else: 0),
          is_aligned: Map.get(optional, :is_aligned, false)
        }}
     end
@@ -57,46 +56,51 @@ defmodule MPEG.TS.PartialPES do
   def unmarshal(_, true), do: {:error, :invalid_packet}
   def unmarshal(data, false), do: {:ok, %__MODULE__{data: data}}
 
-  # padding_stream
-  defp has_header?(0b10111110), do: false
+  @padding_stream_id 0xBE
+  @private_1_stream_id 0xBD
+  @private_2_stream_id 0xBF
 
-  # private_stream_2
-  defp has_header?(0b10111111), do: false
+  defp has_header?(id)
+       when id in [@padding_stream_id, @private_1_stream_id, @private_2_stream_id],
+       do: false
+
   defp has_header?(_other), do: true
 
-  defp parse_optional(<<_sub_stream_id::8, rest>>, false), do: {:ok, %{}, rest}
+  defp parse_optional_header(data, false), do: {:ok, %{}, 0, data}
 
-  defp parse_optional(
-         <<
-           0b10::2,
-           _scrambling_control::2,
-           _priority::1,
-           data_alignment_indicator::1,
-           _copyright::1,
-           _original_or_copy::1,
-           pts_dts_indicator::2,
-           _escr_flag::1,
-           _es_rate_flag::1,
-           _dsm_trick_mode_flag::1,
-           _additional_copy_info_flag::1,
-           _crc_flag::1,
-           _extension_flag::1,
-           pes_header_length::8,
-           optional_fields::binary-size(pes_header_length),
-           rest::binary
-         >>,
+  defp parse_optional_header(
+         x =
+           <<
+             0b10::2,
+             _scrambling_control::2,
+             _priority::1,
+             data_alignment_indicator::1,
+             _copyright::1,
+             _original_or_copy::1,
+             pts_dts_indicator::2,
+             _escr_flag::1,
+             _es_rate_flag::1,
+             _dsm_trick_mode_flag::1,
+             _additional_copy_info_flag::1,
+             _crc_flag::1,
+             _extension_flag::1,
+             pes_header_length::8,
+             optional_fields::binary-size(pes_header_length),
+             rest::binary
+           >>,
          true
        ) do
     pts_dts_indicator = parse_pts_dts_indicator(pts_dts_indicator)
+    header_size = byte_size(x) - byte_size(rest)
 
     with {:ok, optionals_map, _rest} <- parse_pts_dts_field(optional_fields, pts_dts_indicator),
          {:ok, optionals_map} =
            parse_data_alignment_indicator(data_alignment_indicator, optionals_map) do
-      {:ok, optionals_map, rest}
+      {:ok, optionals_map, header_size, rest}
     end
   end
 
-  defp parse_optional(_data, _has_header) do
+  defp parse_optional_header(_data, _has_header) do
     {:error, :invalid_optional_field}
   end
 
@@ -155,17 +159,7 @@ defmodule MPEG.TS.PartialPES do
        ) do
     pts = parse_pts_or_dts_chunks(pts_chunk_one, pts_chunk_two, pts_chunk_three)
     dts = parse_pts_or_dts_chunks(dts_chunk_one, dts_chunk_two, dts_chunk_three)
-
-    if pts - dts > 60 * @ts_clock_hz do
-      # https://github.com/video-dev/hls.js/blob/c14628668e04d14f0217d0118f7e768933524c6d/src/demux/tsdemuxer.ts#L1106
-      Logger.warning(
-        "#{round((pts - dts) / @ts_clock_hz)} delta between PTS and DTS. Aligning them using DTS."
-      )
-
-      {:ok, %{pts: dts, dts: dts}, rest}
-    else
-      {:ok, %{pts: pts, dts: dts}, rest}
-    end
+    {:ok, %{pts: pts, dts: dts}, rest}
   end
 
   defp parse_pts_dts_field(data, _indicator) do
@@ -177,6 +171,6 @@ defmodule MPEG.TS.PartialPES do
     # interpreted as a binary and hence an integer.
     # PTS and DTS originate from a 90kHz clock.
     <<ts::40>> = <<0b0::7, chunk_one::bitstring, chunk_two::bitstring, chunk_three::bitstring>>
-    ts
+    div(ts * 1_000_000_000, @ts_clock_hz)
   end
 end

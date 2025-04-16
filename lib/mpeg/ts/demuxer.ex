@@ -153,27 +153,21 @@ defmodule MPEG.TS.Demuxer do
   end
 
   defp push_es_packets(
-         state = %__MODULE__{demuxed_queues: queues, packet_filter: filter},
+         state = %__MODULE__{packet_filter: filter},
          packets
        ) do
-    queues =
-      packets
-      |> Enum.filter(fn %Packet{pid: pid} -> filter.(pid) end)
-      |> Enum.group_by(fn %Packet{pid: pid} -> pid end)
-      |> Enum.map(fn {pid, packets} ->
-        # WARNING: we're not limiting the number of streams we're tracking.
-        queue =
-          queues
-          |> Map.get_lazy(pid, fn -> StreamQueue.new(pid) end)
-          |> StreamQueue.push_es_packets(packets)
+    packets
+    |> Enum.filter(fn %Packet{pid: pid} -> filter.(pid) end)
+    |> Enum.group_by(fn %Packet{pid: pid} -> pid end)
+    |> Enum.reduce(state, fn {pid, packets}, state ->
+      # WARNING: we're not limiting the number of streams we're tracking.
+      queue =
+        state.demuxed_queues
+        |> Map.get_lazy(pid, fn -> StreamQueue.new(pid) end)
+        |> StreamQueue.push_es_packets(packets)
 
-        {pid, queue}
-      end)
-      |> Enum.reduce(queues, fn {pid, queue}, queues ->
-        Map.put(queues, pid, queue)
-      end)
-
-    %__MODULE__{state | demuxed_queues: queues}
+      put_in(state, [Access.key!(:demuxed_queues), pid], queue)
+    end)
   end
 
   defp parse_buffer(buffer) do
