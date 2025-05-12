@@ -92,7 +92,7 @@ defmodule MPEG.TS.PMT do
        ) do
     stream = %{
       stream_type_id: stream_type_id,
-      stream_type: parse_stream_assigment(stream_type_id)
+      stream_type: parse_stream_type(stream_type_id)
     }
 
     result = Map.put(acc, elementary_pid, stream)
@@ -103,14 +103,87 @@ defmodule MPEG.TS.PMT do
     {:error, :invalid_data}
   end
 
-  # Based on https://en.wikipedia.org/wiki/Program-specific_information#Elementary_stream_types
-  defp parse_stream_assigment(0x01), do: :MPEG1_VIDEO
-  defp parse_stream_assigment(0x02), do: :MPEG2_VIDEO
-  defp parse_stream_assigment(0x03), do: :MPEG1_AUDIO
-  defp parse_stream_assigment(0x04), do: :MPEG2_AUDIO
-  defp parse_stream_assigment(0x0F), do: :AAC
-  defp parse_stream_assigment(0x1B), do: :H264
-  defp parse_stream_assigment(0x1F), do: :MPEG4_SVC
-  defp parse_stream_assigment(0x20), do: :MPEG4_MVC
-  defp parse_stream_assigment(_), do: :undefined
+  @stream_id_to_atom %{
+    0x00 => :RESERVED,
+    0x01 => :MPEG1_VIDEO,
+    0x02 => :MPEG2_VIDEO,
+    0x03 => :MPEG1_AUDIO,
+    0x04 => :MPEG2_AUDIO,
+    0x05 => :MPEG2_PRIVATE_SECTIONS,
+    0x06 => :MPEG2_PES_PRIVATE_DATA,
+    0x07 => :MHEG,
+    0x08 => :MPEG2_DSM_CC,
+    0x09 => :H222_1,
+    0x0A => :ISO_13818_6_TYPE_A,
+    0x0B => :ISO_13818_6_TYPE_B,
+    0x0C => :ISO_13818_6_TYPE_C,
+    0x0D => :ISO_13818_6_TYPE_D,
+    0x0E => :MPEG2_AUX,
+    0x0F => :AAC,
+    0x10 => :MPEG4_VISUAL,
+    0x11 => :MPEG4_AUDIO,
+    0x12 => :ISO_14496_1_IN_PES,
+    0x13 => :ISO_14496_1_IN_SECTIONS,
+    0x14 => :ISO_13818_6_DOWNLOAD,
+    0x15 => :METADATA_IN_PES,
+    0x16 => :METADATA_IN_SECTIONS,
+    0x17 => :METADATA_IN_DATA_CAROUSEL,
+    0x18 => :METADATA_IN_OBJECT_CAROUSEL,
+    0x19 => :METADATA_IN_SYNC_DOWNLOAD,
+    0x1A => :IPMP,
+    0x1B => :H264,
+    0x1C => :ISO_14496_10_TEXT,
+    0x1D => :AUX_VIDEO,
+    0x1E => :SVC,
+    0x1F => :MPEG4_SVC,
+    0x20 => :MPEG4_MVC,
+    0x21 => :JPEG_2000_VIDEO,
+    0x22 => :S3D_MPEG2_VIDEO,
+    0x23 => :S3D_AVC_VIDEO,
+    0x24 => :HEVC,
+    0x25 => :HEVC_TEMPORAL_VIDEO,
+    0x26 => :MVCD,
+    0x27 => :HEVC_TEMPORAL_SCALABLE,
+    0x28 => :HEVC_STEPWISE_TEMPORAL_SCALABLE,
+    0x29 => :HEVC_LAYERED_TEMPORAL_SCALABLE,
+    0x2A => :HEVC_LAYERED_TEMPORAL_SCALABLE_MVC,
+    0x2B => :VVC,
+    0x2C => :VVC_TEMPORAL_SCALABLE,
+    0x2D => :VVC_TEMPORAL_SCALABLE_SUB_BITSTREAM,
+    0x80 => :BLURAY_PCM_AUDIO,
+    0x81 => :AC3_AUDIO,
+    0x82 => :DTS_AUDIO,
+    0x83 => :TRUEHD_AUDIO,
+    0x84 => :EAC3_AUDIO,
+    0x85 => :HDMV_DTS_AUDIO,
+    0x86 => :DTS_HD_HRA_AUDIO,
+    0x87 => :DTS_HD_MA_AUDIO,
+    0x8A => :DTS_UHD_AUDIO,
+    0x90 => :PGS_SUBTITLE,
+    0x91 => :IGS_SUBTITLE,
+    0x92 => :HDMV_TEXT_SUBTITLE,
+    0x42 => :DVB_SUBTITLE,
+    0x59 => :DVB_SUBTITLE_HD,
+    0x73 => :ATSC_DVD_CONTROL,
+    0x77 => :ATSC_DOLBY_E,
+    0x7F => :IPMP_CONTROL,
+    0xC0 => :SCTE_35_SPLICE,
+    0xC1 => :SCTE_35_RESERVED,
+    0xC2 => :SCTE_35_RESERVED
+  }
+
+  @atom_to_stream_id @stream_id_to_atom
+                     |> Enum.map(fn {k, v} -> {v, k} end)
+                     |> Map.new()
+
+  def parse_stream_type(val) when val >= 0xBC and val <= 0xEF, do: {:USER_PRIVATE, val}
+
+  def parse_stream_type(val) do
+    case Map.get(@stream_id_to_atom, val) do
+      nil -> :undefined
+      other -> other
+    end
+  end
+
+  def encode_stream_type(val), do: Map.fetch!(@atom_to_stream_id, val)
 end
