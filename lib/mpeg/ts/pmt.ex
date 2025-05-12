@@ -186,4 +186,112 @@ defmodule MPEG.TS.PMT do
   end
 
   def encode_stream_type(val), do: Map.fetch!(@atom_to_stream_id, val)
+
+  @doc """
+  Categorizes a stream type as :video, :audio, or :other.
+
+  ## Examples
+
+      iex> get_stream_category(:H264)
+      :video
+      
+      iex> get_stream_category(:AAC)
+      :audio
+      
+      iex> get_stream_category(:DVB_SUBTITLE)
+      :other
+  """
+  def get_stream_category(stream_type) do
+    case stream_type do
+      # Video stream types
+      :MPEG1_VIDEO -> :video
+      :MPEG2_VIDEO -> :video
+      :MPEG4_VISUAL -> :video
+      :H264 -> :video
+      :AUX_VIDEO -> :video
+      :SVC -> :video
+      :MPEG4_SVC -> :video
+      :MPEG4_MVC -> :video
+      :JPEG_2000_VIDEO -> :video
+      :S3D_MPEG2_VIDEO -> :video
+      :S3D_AVC_VIDEO -> :video
+      :HEVC -> :video
+      :HEVC_TEMPORAL_VIDEO -> :video
+      :MVCD -> :video
+      :HEVC_TEMPORAL_SCALABLE -> :video
+      :HEVC_STEPWISE_TEMPORAL_SCALABLE -> :video
+      :HEVC_LAYERED_TEMPORAL_SCALABLE -> :video
+      :HEVC_LAYERED_TEMPORAL_SCALABLE_MVC -> :video
+      :VVC -> :video
+      :VVC_TEMPORAL_SCALABLE -> :video
+      :VVC_TEMPORAL_SCALABLE_SUB_BITSTREAM -> :video
+      # Audio stream types
+      :MPEG1_AUDIO -> :audio
+      :MPEG2_AUDIO -> :audio
+      :AAC -> :audio
+      :MPEG4_AUDIO -> :audio
+      :BLURAY_PCM_AUDIO -> :audio
+      :AC3_AUDIO -> :audio
+      :DTS_AUDIO -> :audio
+      :TRUEHD_AUDIO -> :audio
+      :EAC3_AUDIO -> :audio
+      :HDMV_DTS_AUDIO -> :audio
+      :DTS_HD_HRA_AUDIO -> :audio
+      :DTS_HD_MA_AUDIO -> :audio
+      :DTS_UHD_AUDIO -> :audio
+      :ATSC_DOLBY_E -> :audio
+      # All other types (subtitles, private data, etc.)
+      _ -> :other
+    end
+  end
+
+  @doc """
+  Categorizes a stream based on its stream_id (as an integer value) as :video, :audio, or :other.
+
+  ## Examples
+
+      iex> get_stream_category_by_id(0x1B)
+      :video
+      
+      iex> get_stream_category_by_id(0x0F)
+      :audio
+      
+      iex> get_stream_category_by_id(0x42)
+      :other
+  """
+  def get_stream_category_by_id(stream_id) when is_integer(stream_id) do
+    stream_id
+    |> parse_stream_type()
+    |> get_stream_category()
+  end
+
+  @doc """
+  Determines if a given stream type is a video stream.
+
+  ## Examples
+
+      iex> is_video_stream?(:H264)
+      true
+      
+      iex> is_video_stream?(:AAC)
+      false
+  """
+  def is_video_stream?(stream_type) do
+    get_stream_category(stream_type) == :video
+  end
+
+  @doc """
+  Determines if a given stream type is an audio stream.
+
+  ## Examples
+
+      iex> is_audio_stream?(:AAC)
+      true
+      
+      iex> is_audio_stream?(:H264)
+      false
+  """
+  def is_audio_stream?(stream_type) do
+    get_stream_category(stream_type) == :audio
+  end
 end

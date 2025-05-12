@@ -1,5 +1,6 @@
 defmodule MPEG.TS.PMTTest do
   use ExUnit.Case
+  doctest MPEG.TS.PMT, import: true
 
   alias MPEG.TS.PMT
   alias MPEG.TS.Packet
