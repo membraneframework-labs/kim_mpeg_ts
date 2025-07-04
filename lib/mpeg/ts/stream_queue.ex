@@ -13,6 +13,8 @@ defmodule MPEG.TS.StreamQueue do
   @derive Inspect
   defstruct [:stream_id, :partials, :ready]
 
+  @type t :: %__MODULE__{}
+
   def new(stream_id) do
     %__MODULE__{
       stream_id: stream_id,

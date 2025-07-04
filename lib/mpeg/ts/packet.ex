@@ -149,7 +149,7 @@ defmodule MPEG.TS.Packet do
   defp parse_flag(0b0), do: false
 
   @spec parse_payload(binary(), adaptation_control_t(), pid_class_t()) ::
-          {:ok, Map.t(), bitstring()} | {:error, parse_error_t()}
+          {:ok, map(), bitstring()} | {:error, parse_error_t()}
   defp parse_payload(data, :adaptation, _) do
     with {:ok, adaptation} <- parse_adaptation_field(data) do
       {:ok, adaptation, <<>>}
