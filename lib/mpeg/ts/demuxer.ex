@@ -13,7 +13,7 @@ defmodule MPEG.TS.Demuxer do
   @type t :: %__MODULE__{
           pmt: PMT.t() | nil,
           pat: PAT.t() | nil,
-          demuxed_queues: %{required(PMT.stream_id_t()) => StreamBuffer.t()},
+          demuxed_queues: %{required(PMT.stream_id_t()) => StreamQueue.t()},
           packet_filter: (PMT.stream_id_t() -> boolean()),
           buffered_bytes: binary()
         }

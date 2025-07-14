@@ -4,7 +4,7 @@ defmodule MPEG.TS.MixProject do
   def project do
     [
       app: :mpeg_ts,
-      version: "2.0.2",
+      version: "2.0.3",
       elixir: "~> 1.14",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -42,7 +42,8 @@ defmodule MPEG.TS.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}
+      {:ex_doc, ">= 0.0.0", only: :dev, runtime: false},
+      {:dialyxir, "~> 1.3", only: [:dev], runtime: false}
     ]
   end
 

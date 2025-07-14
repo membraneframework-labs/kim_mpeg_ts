@@ -14,6 +14,12 @@ defmodule MPEG.TS.StreamQueue do
   @derive Inspect
   defstruct [:pid, :acc, :ready]
 
+  @type t :: %__MODULE__{
+          pid: pid(),
+          acc: :queue.queue(),
+          ready: :queue.queue()
+        }
+
   def new(pid) do
     %__MODULE__{
       pid: pid,
