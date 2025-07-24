@@ -80,4 +80,34 @@ defmodule MPEG.TS.PSI do
   end
 
   def unmarshal_header(_), do: {:error, :invalid_header}
+
+  defimpl MPEG.TS.Marshaler do
+    @crc_length 4
+    @remaining_header_length 5
+
+    def marshal(%{header: header, table: table}) do
+      section_length =
+        if header.section_syntax_indicator,
+          do: byte_size(table) + @remaining_header_length + @crc_length,
+          else: byte_size(table) + @crc_length
+
+      psi_header =
+        <<0, header.table_id::8, bool_to_int(header.section_syntax_indicator)::1,
+          _private_bit = 0::1, _reserved = 0b11::2, 0::2, section_length::10>>
+
+      long_header =
+        if header.section_syntax_indicator do
+          <<header.transport_stream_id::16, 0b11::2, header.version_number::5,
+            header.current_next_indicator::1, header.section_number::8,
+            header.last_section_number::8>>
+        else
+          <<>>
+        end
+
+      psi_header <> long_header <> table <> <<0::32>>
+    end
+
+    defp bool_to_int(true), do: 1
+    defp bool_to_int(_), do: 0
+  end
 end
