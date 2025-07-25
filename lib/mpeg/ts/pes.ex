@@ -41,7 +41,7 @@ defmodule MPEG.TS.PES do
     end
 
     defp pts_dts_indicator(%{dts: nil, pts: nil}), do: 0
-    defp pts_dts_indicator(%{dts: nil}), do: 1
+    defp pts_dts_indicator(%{dts: nil}), do: 2
     defp pts_dts_indicator(_pes), do: 3
 
     defp marshal_pts_dts(%{dts: nil, pts: nil}), do: <<>>

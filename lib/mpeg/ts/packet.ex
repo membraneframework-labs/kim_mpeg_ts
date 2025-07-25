@@ -39,11 +39,11 @@ defmodule MPEG.TS.Packet do
            ]}
   defstruct [
     :payload,
-    :pusi,
     :pid,
     :pid_class,
     :continuity_counter,
     :pcr,
+    pusi: false,
     scrambling: :no,
     discontinuity_indicator: false,
     random_access_indicator: false,
@@ -52,6 +52,11 @@ defmodule MPEG.TS.Packet do
 
   @type parse_error_t ::
           :invalid_data | :invalid_packet | :unsupported_packet
+
+  @spec new(payload :: payload_t(), opts :: keyword()) :: t()
+  def new(payload, opts \\ []) do
+    struct!(%__MODULE__{payload: payload}, opts)
+  end
 
   @spec parse(binary()) ::
           {:ok, t} | {:error, parse_error_t, binary()}

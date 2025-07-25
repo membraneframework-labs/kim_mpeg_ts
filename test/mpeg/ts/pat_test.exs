@@ -1,7 +1,7 @@
 defmodule MPEG.TS.PATTest do
   use ExUnit.Case
 
-  alias MPEG.TS.PAT
+  alias MPEG.TS.{Marshaler, PAT}
   alias Support.Factory
 
   describe "Program association table parser" do
