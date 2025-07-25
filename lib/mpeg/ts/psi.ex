@@ -82,6 +82,8 @@ defmodule MPEG.TS.PSI do
   def unmarshal_header(_), do: {:error, :invalid_header}
 
   defimpl MPEG.TS.Marshaler do
+    import Bitwise
+
     @crc_length 4
     @remaining_header_length 5
 
@@ -92,22 +94,35 @@ defmodule MPEG.TS.PSI do
           else: byte_size(table) + @crc_length
 
       psi_header =
-        <<0, header.table_id::8, bool_to_int(header.section_syntax_indicator)::1,
+        <<header.table_id::8, bool_to_int(header.section_syntax_indicator)::1,
           _private_bit = 0::1, _reserved = 0b11::2, 0::2, section_length::10>>
 
       long_header =
         if header.section_syntax_indicator do
           <<header.transport_stream_id::16, 0b11::2, header.version_number::5,
-            header.current_next_indicator::1, header.section_number::8,
+            bool_to_int(header.current_next_indicator)::1, header.section_number::8,
             header.last_section_number::8>>
         else
           <<>>
         end
 
-      psi_header <> long_header <> table <> <<0::32>>
+      payload = psi_header <> long_header <> table
+      <<0, payload::binary, crc32(payload)::32>>
     end
 
     defp bool_to_int(true), do: 1
     defp bool_to_int(_), do: 0
+
+    defp crc32(data) do
+      data
+      |> :binary.bin_to_list()
+      |> Enum.reduce(0xFFFFFFFF, fn byte, crc ->
+        crc = bxor(crc, byte <<< 24)
+
+        Enum.reduce(0..7, crc, fn _i, crc ->
+          if (crc &&& 0x80000000) == 0, do: crc <<< 1, else: bxor(crc <<< 1, 0x104C11DB7)
+        end)
+      end)
+    end
   end
 end

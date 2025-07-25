@@ -18,7 +18,7 @@ defmodule MPEG.TS.PES do
 
   defimpl MPEG.TS.Marshaler do
     alias MPEG.TS.PartialPES
-    @max_pes_size 0xFFFFF
+    @max_pes_size 0xFFFF
 
     def marshal(pes) do
       optional_header =

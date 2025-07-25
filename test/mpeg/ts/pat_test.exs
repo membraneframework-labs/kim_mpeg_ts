@@ -13,4 +13,10 @@ defmodule MPEG.TS.PATTest do
       assert {:error, :invalid_data} = PAT.unmarshal_table(<<123, 32, 22, 121, 33>>)
     end
   end
+
+  describe "Marshal program association table" do
+    test "marshals a PAT" do
+      assert Marshaler.marshal(%{1 => 4096}) == Factory.pat()
+    end
+  end
 end

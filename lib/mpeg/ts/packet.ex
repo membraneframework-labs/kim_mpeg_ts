@@ -235,7 +235,7 @@ defmodule MPEG.TS.Packet do
     @scrambling_control [no: 0, reserved: 1, even_key: 2, odd_key: 3]
 
     def marshal(packet) do
-      adaptation = adaptation_payload(packet)
+      adaptation = serialize_adaptation_field(packet)
 
       adaptation_field_value =
         cond do
@@ -249,7 +249,7 @@ defmodule MPEG.TS.Packet do
         packet.continuity_counter::4>> <> adaptation <> packet.payload
     end
 
-    defp adaptation_payload(packet) do
+    defp serialize_adaptation_field(packet) do
       case adaptation_field_present?(packet) do
         true ->
           pcr_data = serialize_pcr(packet.pcr)
@@ -264,7 +264,7 @@ defmodule MPEG.TS.Packet do
         false ->
           case @ts_payload_size - byte_size(packet.payload) do
             0 -> <<>>
-            1 -> <<1>>
+            1 -> <<0>>
             stuffing_bytes -> <<stuffing_bytes - 1, 0>> <> filler_data(stuffing_bytes - 2)
           end
       end
@@ -278,7 +278,7 @@ defmodule MPEG.TS.Packet do
     defp serialize_pcr(nil), do: <<>>
 
     defp serialize_pcr(pcr) do
-      <<div(pcr, 300)::33, 0::6, rem(pcr, 300)::9>>
+      <<div(pcr, 300)::33, 0b111111::6, rem(pcr, 300)::9>>
     end
 
     defp bool_to_int(true), do: 1
