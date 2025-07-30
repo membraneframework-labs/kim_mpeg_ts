@@ -13,7 +13,7 @@ defmodule MPEG.TS.PES do
 
   @spec new(binary(), keyword()) :: t()
   def new(data, opts) do
-    struct!(%__MODULE__{data: data}, opts)
+    struct(%__MODULE__{data: data}, opts)
   end
 
   defimpl MPEG.TS.Marshaler do

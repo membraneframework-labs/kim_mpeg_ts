@@ -55,7 +55,7 @@ defmodule MPEG.TS.Packet do
 
   @spec new(payload :: payload_t(), opts :: keyword()) :: t()
   def new(payload, opts \\ []) do
-    struct!(%__MODULE__{payload: payload}, opts)
+    struct(%__MODULE__{payload: payload}, opts)
   end
 
   @spec parse(binary()) ::
