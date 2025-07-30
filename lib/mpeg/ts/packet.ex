@@ -244,14 +244,19 @@ defmodule MPEG.TS.Packet do
 
       adaptation_field_value =
         cond do
-          byte_size(adaptation) != 0 and byte_size(packet.payload) == 0 -> 2
-          byte_size(adaptation) != 0 and byte_size(packet.payload) != 0 -> 3
+          adaptation != [] and byte_size(packet.payload) == 0 -> 2
+          adaptation != [] and byte_size(packet.payload) != 0 -> 3
           true -> 1
         end
 
-      <<0x47, 0::1, bool_to_int(packet.pusi)::1, 0::1, packet.pid::13,
-        @scrambling_control[packet.scrambling]::2, adaptation_field_value::2,
-        packet.continuity_counter::4>> <> adaptation <> packet.payload
+      [
+        0x47,
+        <<0::1, bool_to_int(packet.pusi)::1, 0::1, packet.pid::13,
+          @scrambling_control[packet.scrambling]::2, adaptation_field_value::2,
+          packet.continuity_counter::4>>,
+        adaptation,
+        packet.payload
+      ]
     end
 
     defp serialize_adaptation_field(packet) do
@@ -261,24 +266,28 @@ defmodule MPEG.TS.Packet do
           header_size = byte_size(pcr_data) + 2
           stuffing_bytes = @ts_payload_size - byte_size(packet.payload) - header_size
 
-          <<header_size + stuffing_bytes - 1, bool_to_int(packet.discontinuity_indicator)::1,
-            bool_to_int(packet.random_access_indicator)::1, 0::1,
-            bool_to_int(pcr_data != <<>>)::1, 0::4,
-            pcr_data::binary>> <> filler_data(stuffing_bytes)
+          [
+            header_size + stuffing_bytes - 1,
+            <<bool_to_int(packet.discontinuity_indicator)::1,
+              bool_to_int(packet.random_access_indicator)::1, 0::1,
+              bool_to_int(pcr_data != <<>>)::1, 0::4>>,
+            pcr_data,
+            filler_data(stuffing_bytes)
+          ]
 
         false ->
           case @ts_payload_size - byte_size(packet.payload) do
-            0 -> <<>>
-            1 -> <<0>>
-            stuffing_bytes -> <<stuffing_bytes - 1, 0>> <> filler_data(stuffing_bytes - 2)
+            0 -> []
+            1 -> [0]
+            stuffing_bytes -> [stuffing_bytes - 1, 0, filler_data(stuffing_bytes - 2)]
           end
       end
     end
 
     defp adaptation_field_present?(%{discontinuity_indicator: true}), do: true
     defp adaptation_field_present?(%{random_access_indicator: true}), do: true
-    defp adaptation_field_present?(%{pcr: pcr}) when not is_nil(pcr), do: true
     defp adaptation_field_present?(%{pcr: nil}), do: false
+    defp adaptation_field_present?(_packet), do: true
 
     defp serialize_pcr(nil), do: <<>>
 
