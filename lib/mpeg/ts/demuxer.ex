@@ -12,7 +12,7 @@ defmodule MPEG.TS.Demuxer do
 
   @type t :: %__MODULE__{
           pmt: PMT.t() | nil,
-          pat: PAT.t() | nil,
+          pat: PAT.t(),
           demuxed_queues: %{required(PMT.stream_id_t()) => StreamQueue.t()},
           packet_filter: (PMT.stream_id_t() -> boolean()),
           buffered_bytes: binary()
@@ -21,7 +21,7 @@ defmodule MPEG.TS.Demuxer do
   defstruct [
     :pmt,
     :packet_filter,
-    pat: %{},
+    pat: %PAT{},
     demuxed_queues: %{},
     buffered_bytes: <<>>,
     waiting_random_access_indicator: true
@@ -50,7 +50,7 @@ defmodule MPEG.TS.Demuxer do
     {pat_packets, packets} = Enum.split_with(packets, fn x -> x.pid_class == :pat end)
 
     state = push_pat_packets(state, pat_packets)
-    pid_with_pmt = Map.values(state.pat)
+    pid_with_pmt = Map.values(state.pat.programs)
 
     {pmt_packets, packets} =
       Enum.split_with(packets, fn x ->
@@ -94,15 +94,17 @@ defmodule MPEG.TS.Demuxer do
       pat_packets
       |> Enum.map(fn x ->
         case PAT.unmarshal(x.payload, x.pusi) do
-          {:ok, table} ->
-            table
+          {:ok, pat} ->
+            pat
 
           {:error, reason} ->
             raise ArgumentError,
                   "PAT did not manage to unmarshal packet: #{inspect(x)}, reason: #{inspect(reason)}"
         end
       end)
-      |> Enum.reduce(state.pat, fn new, old -> Map.merge(old, new) end)
+      |> Enum.reduce(state.pat, fn new, old ->
+        %{old | programs: Map.merge(old.programs, new.programs)}
+      end)
 
     state
     |> put_in([Access.key!(:pat)], pat)

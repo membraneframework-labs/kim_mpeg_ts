@@ -6,7 +6,7 @@ defmodule MPEG.TS.PATTest do
 
   describe "Program association table parser" do
     test "parses valid packet" do
-      assert {:ok, %{1 => 4096}} = PAT.unmarshal_table(Factory.pat())
+      assert {:ok, %PAT{programs: %{1 => 4096}}} = PAT.unmarshal_table(Factory.pat())
     end
 
     test "returns an error when data is not valid" do
@@ -16,7 +16,7 @@ defmodule MPEG.TS.PATTest do
 
   describe "Marshal program association table" do
     test "marshals a PAT" do
-      assert Marshaler.marshal(%{1 => 4096}) == Factory.pat()
+      assert Marshaler.marshal(%PAT{programs: %{1 => 4096}}) == Factory.pat()
     end
   end
 end

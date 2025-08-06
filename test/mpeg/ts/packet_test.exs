@@ -41,7 +41,7 @@ defmodule MPEG.TS.PacketTest do
       expected_payload = <<0x47, 0x01, 0x00, 0x1F, payload::binary>>
 
       packet = Packet.new(payload, pid: 0x100, continuity_counter: 15)
-      assert Marshaler.marshal(packet) == expected_payload
+      assert Marshaler.marshal(packet) |> IO.iodata_to_binary() == expected_payload
 
       assert {:ok,
               %Packet{
@@ -70,7 +70,7 @@ defmodule MPEG.TS.PacketTest do
           pcr: 1000
         )
 
-      assert Marshaler.marshal(packet) == expected_payload
+      assert Marshaler.marshal(packet) |> IO.iodata_to_binary() == expected_payload
     end
 
     test "Add stuffing bytes" do
@@ -81,7 +81,7 @@ defmodule MPEG.TS.PacketTest do
 
       packet = Packet.new(payload, pid: 0x100, continuity_counter: 10, pusi: true)
 
-      assert Marshaler.marshal(packet) == expected_payload
+      assert Marshaler.marshal(packet) |> IO.iodata_to_binary() == expected_payload
       assert {:ok, %Packet{payload: ^payload}} = Packet.parse(expected_payload)
     end
   end
