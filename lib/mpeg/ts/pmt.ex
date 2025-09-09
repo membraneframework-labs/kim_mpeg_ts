@@ -303,7 +303,7 @@ defmodule MPEG.TS.PMT do
           <<stream.stream_type_id::8, 0b111::3, pid::13, 0b1111::4, 0::12>>
         end)
 
-      <<0b111::3, pmt.pcr_pid::13, 0b1111::4, 0::12>> <> streams
+      <<0b111::3, pmt.pcr_pid || 0x1FFF::13, 0b1111::4, 0::12>> <> streams
     end
   end
 end
