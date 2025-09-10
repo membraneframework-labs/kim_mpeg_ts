@@ -59,7 +59,7 @@ defmodule MPEG.TS.Muxer do
 
     muxer = %__MODULE__{
       muxer
-      | pmt: %PMT{pmt | streams: new_streams, pcr_pid: if(pcr?, do: pid, else: pmt.pcr_pid)},
+      | pmt: %{pmt | streams: new_streams, pcr_pid: if(pcr?, do: pid, else: pmt.pcr_pid)},
         continuity_counters: Map.put(muxer.continuity_counters, pid, 0),
         pid_to_stream_id: Map.put(muxer.pid_to_stream_id, pid, stream_id)
     }
@@ -111,11 +111,10 @@ defmodule MPEG.TS.Muxer do
         ) ::
           {[Packet.t()], t()}
   def mux_sample(muxer, pid, payload, pts, opts \\ []) do
-    stream = muxer.pmt.streams[pid]
     continuity_counter = Map.fetch!(muxer.continuity_counters, pid)
     send_pcr? = Keyword.get(opts, :send_pcr?, false)
 
-    pes = PES.new(payload, stream_id: stream_id(stream.stream_type), dts: opts[:dts], pts: pts)
+    pes = PES.new(payload, stream_id: muxer.pid_to_stream_id[pid], dts: opts[:dts], pts: pts)
     packets = generate(pes, pid, opts[:sync?] || false, send_pcr?, continuity_counter)
 
     continuity_counters =
@@ -135,9 +134,6 @@ defmodule MPEG.TS.Muxer do
     continuity_counters = Map.update!(state.continuity_counters, pid, &rem(&1 + 1, @max_counter))
     {psi_packet, %{state | continuity_counters: continuity_counters}}
   end
-
-  defp stream_id(:video), do: 0xE0
-  defp stream_id(:audio), do: 0xC0
 
   defp generate(pes, pid, sync?, send_pcr?, continuity_counter) do
     pes_data = Marshaler.marshal(pes)
