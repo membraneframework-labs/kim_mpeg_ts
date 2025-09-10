@@ -115,7 +115,7 @@ defmodule MPEG.TS.Muxer do
     send_pcr? = Keyword.get(opts, :send_pcr?, false)
 
     pes = PES.new(payload, stream_id: muxer.pid_to_stream_id[pid], dts: opts[:dts], pts: pts)
-    packets = generate(pes, pid, opts[:sync?] || false, send_pcr?, continuity_counter)
+    packets = chunk_pes(pes, pid, opts[:sync?] || false, send_pcr?, continuity_counter)
 
     continuity_counters =
       Map.update!(muxer.continuity_counters, pid, &rem(&1 + length(packets), @max_counter))
@@ -135,7 +135,7 @@ defmodule MPEG.TS.Muxer do
     {psi_packet, %{state | continuity_counters: continuity_counters}}
   end
 
-  defp generate(pes, pid, sync?, send_pcr?, continuity_counter) do
+  defp chunk_pes(pes, pid, sync?, send_pcr?, continuity_counter) do
     pes_data = Marshaler.marshal(pes)
     header_size = 8
     pcr = if send_pcr?, do: (pes.dts || pes.pts) * 300
