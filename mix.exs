@@ -4,7 +4,7 @@ defmodule MPEG.TS.MixProject do
   def project do
     [
       app: :mpeg_ts,
-      version: "2.1.0",
+      version: "2.2.0",
       elixir: "~> 1.14",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -18,8 +18,7 @@ defmodule MPEG.TS.MixProject do
 
   defp description do
     """
-    MPEG Transport Stream (TS) library. Deserializes packets and demuxes them (no
-    serializer nor muxer).
+    MPEG Transport Stream (TS) library.
     """
   end
 
