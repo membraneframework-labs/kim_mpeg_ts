@@ -27,7 +27,7 @@ defmodule MPEG.TS.DemuxerTest do
              pcr_pid: 256,
              program_info: [],
              streams: %{
-               256 => %{stream_type: :H264, stream_type_id: 27},
+               256 => %{stream_type: :H264_AVC, stream_type_id: 27},
                257 => %{stream_type: :MPEG1_AUDIO, stream_type_id: 3}
              }
            } == pmt

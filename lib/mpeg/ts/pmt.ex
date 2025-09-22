@@ -105,71 +105,124 @@ defmodule MPEG.TS.PMT do
 
   @stream_id_to_atom %{
     0x00 => :RESERVED,
+    # ISO/IEC 11172-2
     0x01 => :MPEG1_VIDEO,
+    # ITU-T H.262 / ISO/IEC 13818-2
     0x02 => :MPEG2_VIDEO,
+    # ISO/IEC 11172-3
     0x03 => :MPEG1_AUDIO,
+    # ISO/IEC 13818-3
     0x04 => :MPEG2_AUDIO,
-    0x05 => :MPEG2_PRIVATE_SECTIONS,
-    0x06 => :MPEG2_PES_PRIVATE_DATA,
+    # private_sections
+    0x05 => :PRIVATE_SECTIONS,
+    # used for DVB subtitles via descriptor 0x59
+    0x06 => :PES_PRIVATE_DATA,
+    # ISO/IEC 13522
     0x07 => :MHEG,
-    0x08 => :MPEG2_DSM_CC,
-    0x09 => :H222_1,
+    # ISO/IEC 13818-1 DSM-CC
+    0x08 => :DSM_CC,
+    # H.222.0 / 11172-1 aux
+    0x09 => :H222_1_AUX,
+    # DSM-CC multiprotocol encapsulation
     0x0A => :ISO_13818_6_TYPE_A,
+    # DSM-CC U-N messages
     0x0B => :ISO_13818_6_TYPE_B,
+    # DSM-CC stream descriptors
     0x0C => :ISO_13818_6_TYPE_C,
+    # DSM-CC sections
     0x0D => :ISO_13818_6_TYPE_D,
-    0x0E => :MPEG2_AUX,
-    0x0F => :AAC,
+    # ISO/IEC 13818-1 ancillary
+    0x0E => :ANCILLARY_DATA,
+    # ISO/IEC 13818-7 ADTS AAC
+    0x0F => :AAC_ADTS,
+    # ISO/IEC 14496-2
     0x10 => :MPEG4_VISUAL,
-    0x11 => :MPEG4_AUDIO,
-    0x12 => :ISO_14496_1_IN_PES,
-    0x13 => :ISO_14496_1_IN_SECTIONS,
+    # ISO/IEC 14496-3 LATM/LOAS
+    0x11 => :MPEG4_AUDIO_LATM,
+    # MPEG-4 SL in PES
+    0x12 => :ISO_14496_1_SL_IN_PES,
+    # MPEG-4 SL in sections / FlexMux
+    0x13 => :ISO_14496_1_SL_IN_SECTIONS,
+    # DSM-CC sync download
     0x14 => :ISO_13818_6_DOWNLOAD,
     0x15 => :METADATA_IN_PES,
     0x16 => :METADATA_IN_SECTIONS,
     0x17 => :METADATA_IN_DATA_CAROUSEL,
     0x18 => :METADATA_IN_OBJECT_CAROUSEL,
     0x19 => :METADATA_IN_SYNC_DOWNLOAD,
+    # ISO/IEC 13818-11
     0x1A => :IPMP,
-    0x1B => :H264,
-    0x1C => :ISO_14496_10_TEXT,
-    0x1D => :AUX_VIDEO,
-    0x1E => :SVC,
-    0x1F => :MPEG4_SVC,
-    0x20 => :MPEG4_MVC,
-    0x21 => :JPEG_2000_VIDEO,
-    0x22 => :S3D_MPEG2_VIDEO,
-    0x23 => :S3D_AVC_VIDEO,
+    # ITU-T H.264 / ISO/IEC 14496-10
+    0x1B => :H264_AVC,
+    # ISO/IEC 14496-3 raw audio
+    0x1C => :MPEG4_RAW_AUDIO,
+    # ISO/IEC 14496-17 text
+    0x1D => :MPEG4_TEXT,
+    # ISO/IEC 23002-3 auxiliary video
+    0x1E => :MPEG4_AUX_VIDEO,
+    # AVC SVC sub-bitstream
+    0x1F => :SVC_SUB_BITSTREAM,
+    # AVC MVC sub-bitstream
+    0x20 => :MVC_SUB_BITSTREAM,
+    # ITU-T T.800 / ISO/IEC 15444
+    0x21 => :JPEG2000_VIDEO,
+    0x22 => :RESERVED,
+    0x23 => :RESERVED,
+    # ITU-T H.265 / ISO/IEC 23008-2 (HEVC) main stream
     0x24 => :HEVC,
-    0x25 => :HEVC_TEMPORAL_VIDEO,
-    0x26 => :MVCD,
-    0x27 => :HEVC_TEMPORAL_SCALABLE,
-    0x28 => :HEVC_STEPWISE_TEMPORAL_SCALABLE,
-    0x29 => :HEVC_LAYERED_TEMPORAL_SCALABLE,
-    0x2A => :HEVC_LAYERED_TEMPORAL_SCALABLE_MVC,
-    0x2B => :VVC,
-    0x2C => :VVC_TEMPORAL_SCALABLE,
-    0x2D => :VVC_TEMPORAL_SCALABLE_SUB_BITSTREAM,
-    0x80 => :BLURAY_PCM_AUDIO,
+    # HEVC temporal video subset
+    0x25 => :HEVC_TEMPORAL_VIDEO_SUBSET,
+    # generic metadata (per ISO table)
+    0x26 => :METADATA,
+    # metadata STD
+    0x27 => :METADATA_STD,
+    # HEVC sub-partition (hierarchy/operation points)
+    0x28 => :HEVC_SUB_PARTITION,
+    # HEVC timing/HRD signaling
+    0x29 => :HEVC_TIMING_HRD,
+    # HEVC base sub-partition (per Amd.2 notes)
+    0x2A => :HEVC_SUB_PARTITION_BASE,
+    # HEVC enhancement/temporal sub-partition
+    0x2B => :HEVC_SUB_PARTITION_ENH,
+
+    # --- Private / ecosystem-specific assignments ---
+
+    # Blu-ray (BDAV) commonly-used private stream_types:
+    # Blu-ray PCM (note: 0x80 also used by DigiCipher II in cable)
+    0x80 => :BD_PCM_AUDIO,
+    # Dolby Digital (Blu-ray/ATSC)
     0x81 => :AC3_AUDIO,
+    # DTS (Blu-ray)
     0x82 => :DTS_AUDIO,
+    # Dolby TrueHD (Blu-ray)
     0x83 => :TRUEHD_AUDIO,
+    # Dolby Digital Plus (Blu-ray)
     0x84 => :EAC3_AUDIO,
-    0x85 => :HDMV_DTS_AUDIO,
-    0x86 => :DTS_HD_HRA_AUDIO,
-    0x87 => :DTS_HD_MA_AUDIO,
-    0x8A => :DTS_UHD_AUDIO,
+    # DTS-HD (Blu-ray)
+    0x85 => :DTS_HD_AUDIO,
+    # 0x86 has two competing uses in the wild:
+    #   - Broadcast/cable: SCTE-35 splice info (standardized & used by FFmpeg)
+    #   - Blu-ray: sometimes reported for DTS-HD MA/LRA variants
+    # Prefer mapping to SCTE-35 for TS tooling; Blu-ray disambiguates via descriptors.
+    # SCTE-35 cue messages
+    0x86 => :SCTE_35_SPLICE,
+    # E-AC-3 (ATSC usage)
+    0x87 => :EAC3_AUDIO_ATSC,
+    # 0x88–0x8F: privately defined; left unmapped
+    # Blu-ray Presentation Graphic Stream (PGS)
     0x90 => :PGS_SUBTITLE,
-    0x91 => :IGS_SUBTITLE,
-    0x92 => :HDMV_TEXT_SUBTITLE,
-    0x42 => :DVB_SUBTITLE,
-    0x59 => :DVB_SUBTITLE_HD,
-    0x73 => :ATSC_DVD_CONTROL,
-    0x77 => :ATSC_DOLBY_E,
-    0x7F => :IPMP_CONTROL,
-    0xC0 => :SCTE_35_SPLICE,
-    0xC1 => :SCTE_35_RESERVED,
-    0xC2 => :SCTE_35_RESERVED
+    # 0x91 is not Blu-ray IGS; it's used by ATSC DSM-CC Network Resources in some lists
+    0x91 => :ATSC_DSMCC_NETWORK_RESOURCES,
+
+    # DigiCipher II / ATSC private (examples commonly seen)
+    0xC0 => :DIGICIPHER_TEXT,
+    0xC1 => :AC3_AES128_ENCRYPTED,
+    0xC2 => :ATSC_DSMCC_SYNC_DATA,
+
+    # --- Newer video codecs ---
+    # H.266 / VVC in MPEG-TS
+    0x33 => :VVC
+    # (Other 0xD1.. entries like Dirac/AVS are vendor/region-specific and left out unless you need them)
   }
 
   @atom_to_stream_id @stream_id_to_atom
@@ -193,56 +246,148 @@ defmodule MPEG.TS.PMT do
 
   ## Examples
 
-      iex> get_stream_category(:H264)
+      iex> get_stream_category(:H264_AVC)
       :video
 
-      iex> get_stream_category(:AAC)
+      iex> get_stream_category(:AAC_ADTS)
       :audio
 
       iex> get_stream_category(:DVB_SUBTITLE)
-      :other
+      :subtitles
   """
   def get_stream_category(stream_type) do
     case stream_type do
-      # Video stream types
-      :MPEG1_VIDEO -> :video
-      :MPEG2_VIDEO -> :video
-      :MPEG4_VISUAL -> :video
-      :H264 -> :video
-      :AUX_VIDEO -> :video
-      :SVC -> :video
-      :MPEG4_SVC -> :video
-      :MPEG4_MVC -> :video
-      :JPEG_2000_VIDEO -> :video
-      :S3D_MPEG2_VIDEO -> :video
-      :S3D_AVC_VIDEO -> :video
-      :HEVC -> :video
-      :HEVC_TEMPORAL_VIDEO -> :video
-      :MVCD -> :video
-      :HEVC_TEMPORAL_SCALABLE -> :video
-      :HEVC_STEPWISE_TEMPORAL_SCALABLE -> :video
-      :HEVC_LAYERED_TEMPORAL_SCALABLE -> :video
-      :HEVC_LAYERED_TEMPORAL_SCALABLE_MVC -> :video
-      :VVC -> :video
-      :VVC_TEMPORAL_SCALABLE -> :video
-      :VVC_TEMPORAL_SCALABLE_SUB_BITSTREAM -> :video
-      # Audio stream types
-      :MPEG1_AUDIO -> :audio
-      :MPEG2_AUDIO -> :audio
-      :AAC -> :audio
-      :MPEG4_AUDIO -> :audio
-      :BLURAY_PCM_AUDIO -> :audio
-      :AC3_AUDIO -> :audio
-      :DTS_AUDIO -> :audio
-      :TRUEHD_AUDIO -> :audio
-      :EAC3_AUDIO -> :audio
-      :HDMV_DTS_AUDIO -> :audio
-      :DTS_HD_HRA_AUDIO -> :audio
-      :DTS_HD_MA_AUDIO -> :audio
-      :DTS_UHD_AUDIO -> :audio
-      :ATSC_DOLBY_E -> :audio
-      # All other types (subtitles, private data, etc.)
-      _ -> :other
+      # -------------------------
+      # VIDEO
+      # -------------------------
+      t
+      when t in [
+             :MPEG1_VIDEO,
+             :MPEG2_VIDEO,
+             :MPEG4_VISUAL,
+             :H264_AVC,
+             :AUX_VIDEO,
+             :MPEG4_AUX_VIDEO,
+             :SVC,
+             :SVC_SUB_BITSTREAM,
+             :MPEG4_SVC,
+             :MPEG4_MVC,
+             :MVC_SUB_BITSTREAM,
+             :JPEG_2000_VIDEO,
+             :HEVC,
+             :HEVC_TEMPORAL_VIDEO,
+             :HEVC_TEMPORAL_SCALABLE,
+             :HEVC_STEPWISE_TEMPORAL_SCALABLE,
+             :HEVC_LAYERED_TEMPORAL_SCALABLE,
+             :HEVC_LAYERED_TEMPORAL_SCALABLE_MVC,
+             :HEVC_TEMPORAL_VIDEO_SUBSET,
+             :HEVC_SUB_PARTITION,
+             :HEVC_TIMING_HRD,
+             :HEVC_SUB_PARTITION_BASE,
+             :HEVC_SUB_PARTITION_ENH,
+             :VVC,
+             :VVC_TEMPORAL_SCALABLE,
+             :VVC_TEMPORAL_SCALABLE_SUB_BITSTREAM
+           ] ->
+        :video
+
+      # -------------------------
+      # AUDIO
+      # -------------------------
+      t
+      when t in [
+             :MPEG1_AUDIO,
+             :MPEG2_AUDIO,
+             :AAC_ADTS,
+             :MPEG4_AUDIO,
+             :MPEG4_AUDIO_LATM,
+             :BLURAY_PCM_AUDIO,
+             :BD_PCM_AUDIO,
+             :AC3_AUDIO,
+             :EAC3_AUDIO,
+             :EAC3_AUDIO_ATSC,
+             :DTS_AUDIO,
+             :DTS_HD_AUDIO,
+             :DTS_HD_HRA_AUDIO,
+             :DTS_HD_MA_AUDIO,
+             :DTS_UHD_AUDIO,
+             :TRUEHD_AUDIO,
+             :ATSC_DOLBY_E
+           ] ->
+        :audio
+
+      # -------------------------
+      # SUBTITLES / GRAPHICS
+      # (Note: DVB subtitles are signaled with stream_type 0x06 + descriptor 0x59.)
+      # -------------------------
+      t
+      when t in [
+             :PGS_SUBTITLE,
+             :HDMV_TEXT_SUBTITLE,
+             :DVB_SUBTITLE,
+             :DVB_SUBTITLE_HD
+           ] ->
+        :subtitles
+
+      # -------------------------
+      # CUES / AD-MARKERS
+      # -------------------------
+      t
+      when t in [
+             :SCTE_35_SPLICE,
+             :SCTE_35_RESERVED
+           ] ->
+        :cues
+
+      # -------------------------
+      # METADATA
+      # -------------------------
+      t
+      when t in [
+             :METADATA_IN_PES,
+             :METADATA_IN_SECTIONS,
+             :METADATA_IN_DATA_CAROUSEL,
+             :METADATA_IN_OBJECT_CAROUSEL,
+             :METADATA_IN_SYNC_DOWNLOAD,
+             :METADATA,
+             :METADATA_STD
+           ] ->
+        :metadata
+
+      # -------------------------
+      # IPMP / DRM
+      # -------------------------
+      :IPMP ->
+        :ipmp
+
+      # -------------------------
+      # GENERAL DATA / SIGNALING
+      # (PES private, sections, DSM-CC, MHEG, ancillary, downloads, etc.)
+      # -------------------------
+      t
+      when t in [
+             :PRIVATE_SECTIONS,
+             :PES_PRIVATE_DATA,
+             :MHEG,
+             :DSM_CC,
+             :ISO_13818_6_TYPE_A,
+             :ISO_13818_6_TYPE_B,
+             :ISO_13818_6_TYPE_C,
+             :ISO_13818_6_TYPE_D,
+             :ANCILLARY_DATA,
+             :ISO_13818_6_DOWNLOAD,
+             :ISO_14496_1_SL_IN_PES,
+             :ISO_14496_1_SL_IN_SECTIONS,
+             :ATSC_DSMCC_NETWORK_RESOURCES,
+             :DIGICIPHER_TEXT,
+             :AC3_AES128_ENCRYPTED,
+             :ATSC_DSMCC_SYNC_DATA
+           ] ->
+        :data
+
+      # Fallback
+      _ ->
+        :other
     end
   end
 
@@ -271,10 +416,10 @@ defmodule MPEG.TS.PMT do
 
   ## Examples
 
-      iex> is_video_stream?(:H264)
+      iex> is_video_stream?(:H264_AVC)
       true
 
-      iex> is_video_stream?(:AAC)
+      iex> is_video_stream?(:AAC_ADTS)
       false
   """
   def is_video_stream?(stream_type) do
@@ -286,10 +431,10 @@ defmodule MPEG.TS.PMT do
 
   ## Examples
 
-      iex> is_audio_stream?(:AAC)
+      iex> is_audio_stream?(:AAC_ADTS)
       true
 
-      iex> is_audio_stream?(:H264)
+      iex> is_audio_stream?(:H264_AVC)
       false
   """
   def is_audio_stream?(stream_type) do
