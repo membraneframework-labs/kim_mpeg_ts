@@ -107,33 +107,13 @@ defmodule MPEG.TS.Packet do
   @spec parse_many(binary()) :: [{:error, parse_error_t(), binary()} | {:ok, t}]
   def parse_many(data), do: parse_many(data, [])
 
-  @spec parse_many!(binary()) :: [t]
-  def parse_many!(data) do
-    data
-    |> parse_many()
-    |> Enum.map(fn {:ok, x} -> x end)
-  end
-
-  @spec parse_valid(binary()) :: [t]
-  def parse_valid(data) do
-    data
-    |> parse_many()
-    |> Enum.filter(fn
-      {:ok, _} -> true
-      {:error, _, _} -> false
-    end)
-    |> Enum.map(fn {:ok, x} -> x end)
-  end
-
   defp parse_many(<<>>, acc), do: Enum.reverse(acc)
 
-  defp parse_many(<<packet::binary-@ts_packet_size, rest::binary>>, acc) do
-    parse_many(rest, [parse(packet) | acc])
-  end
+  defp parse_many(<<packet::binary-@ts_packet_size, rest::binary>>, acc),
+    do: parse_many(rest, [parse(packet) | acc])
 
-  defp parse_many(data, acc) when byte_size(data) < @ts_packet_size do
-    parse_many(<<>>, [parse(data) | acc])
-  end
+  defp parse_many(data, acc) when byte_size(data) < @ts_packet_size,
+    do: parse_many(<<>>, [parse(data) | acc])
 
   defp parse_adaptation_field_control(0b01), do: :payload
   defp parse_adaptation_field_control(0b10), do: :adaptation

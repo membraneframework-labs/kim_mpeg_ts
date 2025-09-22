@@ -6,173 +6,151 @@ defmodule MPEG.TS.Demuxer do
   alias MPEG.TS.Packet
   alias MPEG.TS.PMT
   alias MPEG.TS.PAT
-  alias MPEG.TS.StreamQueue
+  alias MPEG.TS.PES
+  alias MPEG.TS.PSI
+  alias MPEG.TS.StreamAggregator
+
+  defmodule Error do
+    defexception [:message]
+
+    defp format_data(nil), do: "<N/A>"
+
+    defp format_data(data) do
+      data
+      |> :binary.bin_to_list()
+      |> Enum.take(4)
+      |> :binary.list_to_bin()
+      |> :binary.encode_hex()
+    end
+
+    @impl true
+    def exception(%{reason: reason, data: data}) do
+      message = "Unrecoverable parse error: #{inspect(reason)} (#{format_data(data)})"
+      %__MODULE__{message: message}
+    end
+  end
 
   require Logger
 
   @type t :: %__MODULE__{
-          pmt: PMT.t() | nil,
-          pat: PAT.t(),
-          demuxed_queues: %{required(PMT.stream_id_t()) => StreamQueue.t()},
-          packet_filter: (PMT.stream_id_t() -> boolean()),
-          buffered_bytes: binary()
+          pending: binary(),
+          # Each PID that requires ES re-assemblement get's a queue here,
+          # from which we extrac complete buffers.
+          stream_aggregators: %{Packet.pid_t() => StreamAggregator.t()},
+          # Each stream that appears in any PMT is added here as they are the
+          # streams that have been recognised. Each of these streams has its own
+          # stream_aggregators, if needed (i.e. they'r category is either audio or video).
+          streams: %{Packet.pid_t() => PMT.stream_t()},
+          # Reverse map of the PAT table, used for fast lookup
+          pids_with_pmt: %{Packet.pid_t() => PAT.program_id_t()}
         }
 
-  defstruct [
-    :pmt,
-    :packet_filter,
-    pat: %PAT{},
-    demuxed_queues: %{},
-    buffered_bytes: <<>>,
-    waiting_random_access_indicator: true
-  ]
+  defstruct pending: <<>>, pids_with_pmt: %{}, stream_aggregators: %{}, streams: %{}
 
   @spec new() :: t()
-  def new(), do: %__MODULE__{packet_filter: fn _ -> true end}
+  def new(), do: %__MODULE__{}
 
-  def push_buffer(state, buffer, discontinuity \\ false) do
-    {ok, bytes_to_buffer} = parse_buffer(state.buffered_bytes <> buffer)
-
-    ok =
-      Enum.map(ok, fn ts ->
-        %{ts | discontinuity: discontinuity}
+  @type unit :: PES.t() | PMT.t() | PAT.t() | PSI.t()
+  @spec demux(t(), iodata()) :: {[unit()], t()}
+  def demux(state, data) do
+    {packets, state} =
+      get_and_update_in(state, [:pending], fn pending ->
+        parse_packets(pending <> data)
       end)
 
-    state = push_packets(%__MODULE__{state | buffered_bytes: <<>>}, ok)
-    %__MODULE__{state | buffered_bytes: bytes_to_buffer}
+    demux_packets(state, packets, [])
   end
 
-  def push_packets(%__MODULE__{buffered_bytes: buf}, _) when byte_size(buf) > 0 do
-    raise "Packets were pushed in the buffer while previous raw bytes are pending"
+  defp demux_packets(state, [], acc) do
+    {Enum.reverse(acc), state}
   end
 
-  def push_packets(state, packets) do
-    {pat_packets, packets} = Enum.split_with(packets, fn x -> x.pid_class == :pat end)
+  defp demux_packets(state = %{pat: nil}, packets, acc) do
+    # Until we find a PAT table we don't know which PID's contain what.
+    {pat_pkt, rest} =
+      packets
+      |> Enum.drop_while(fn x -> x.pid_class == :pat and x.pusi end)
+      |> List.first()
 
-    state = push_pat_packets(state, pat_packets)
-    pid_with_pmt = Map.values(state.pat.programs)
-
-    {pmt_packets, packets} =
-      Enum.split_with(packets, fn x ->
-        x.pid in pid_with_pmt
-      end)
-
-    state
-    |> push_pmt_packets(pmt_packets)
-    |> push_es_packets(packets)
+    {pat, state} = handle_pat(pat_pkt, state)
+    demux_packets(state, rest, [pat | acc])
   end
 
-  def end_of_stream(state = %__MODULE__{demuxed_queues: queues}) do
-    queues =
-      queues
-      |> Enum.map(fn {stream_id, queue} -> {stream_id, StreamQueue.end_of_stream(queue)} end)
-      |> Enum.into(%{})
+  defp demux_packets(state, [pkt | pkts], acc) when is_map_key(state.pids_with_pmt, pkt.pid) do
+    # This packet carries a PMT table.
+    with {:ok, pmt} <- PMT.unmarshal(pkt.payload, pkt.pusi) do
+      state =
+        state
+        |> update_in([Access.key!(:streams)], &Map.merge(&1, pmt.streams))
+        |> then(fn state ->
+          # Ensure that each PMT stream that we have has a stream queue associated with it.
+          state.streams
+          |> Enum.reduce(state, fn {_pid, stream}, state ->
+            update_in(state, [Access.key!(:stream_aggregators)], fn
+              nil ->
+                if PMT.get_stream_category(stream.stream_type) in [:audio, :video] do
+                  StreamAggregator.new()
+                end
 
-    %__MODULE__{state | demuxed_queues: queues}
-  end
+              queue ->
+                queue
+            end)
+          end)
+        end)
 
-  def take(state = %__MODULE__{demuxed_queues: queues}, stream_id, size \\ 1) do
-    case Map.get(queues, stream_id) do
-      nil ->
-        {[], state}
-
-      queue ->
-        {packets, queue} = StreamQueue.take(queue, size)
-        {packets, %__MODULE__{state | demuxed_queues: Map.put(queues, stream_id, queue)}}
-    end
-  end
-
-  def size(%__MODULE__{demuxed_queues: queues}, stream_id) do
-    case Map.get(queues, stream_id) do
-      nil -> 0
-      %StreamQueue{ready: q} -> :queue.len(q)
-    end
-  end
-
-  defp push_pat_packets(state, pat_packets) do
-    pat =
-      pat_packets
-      |> Enum.map(fn x ->
-        case PAT.unmarshal(x.payload, x.pusi) do
-          {:ok, pat} ->
-            pat
-
-          {:error, reason} ->
-            raise ArgumentError,
-                  "PAT did not manage to unmarshal packet: #{inspect(x)}, reason: #{inspect(reason)}"
-        end
-      end)
-      |> Enum.reduce(state.pat, fn new, old ->
-        %{old | programs: Map.merge(old.programs, new.programs)}
-      end)
-
-    state
-    |> put_in([Access.key!(:pat)], pat)
-  end
-
-  defp push_pmt_packets(state, pmt_packets) do
-    last_pmt =
-      pmt_packets
-      |> Enum.map(fn x ->
-        case PMT.unmarshal(x.payload, x.pusi) do
-          {:ok, table} ->
-            table
-
-          {:error, reason} ->
-            raise ArgumentError,
-                  "PMT did not manage to unmarshal packet: #{inspect(x)}, reason: #{inspect(reason)}"
-        end
-      end)
-      |> List.last()
-
-    pmt = if last_pmt != nil, do: last_pmt, else: state.pmt
-    %__MODULE__{state | pmt: pmt}
-  end
-
-  defp push_es_packets(
-         state = %__MODULE__{waiting_random_access_indicator: true},
-         packets
-       ) do
-    rai = Enum.find_index(packets, fn x -> x.random_access_indicator end)
-
-    if rai == nil do
-      discard_count = length(packets)
-
-      if discard_count > 0 do
-        Logger.warning(
-          "Discarding #{discard_count} packets while waiting for random access indicator",
-          domain: __MODULE__
-        )
-      end
-
-      state
+      demux_packets(state, pkts, [pmt | acc])
     else
-      Logger.debug("Random access indicator found", domain: __MODULE__)
-
-      packets = Enum.slice(packets, Range.new(rai, -1, 1))
-      push_es_packets(%{state | waiting_random_access_indicator: false}, packets)
+      {:error, reason} -> raise Error, %{reason: reason, data: pkt.payload}
     end
   end
 
-  defp push_es_packets(
-         state = %__MODULE__{packet_filter: filter},
-         packets
-       ) do
-    packets
-    |> Enum.filter(fn %Packet{pid: pid} -> filter.(pid) end)
-    |> Enum.group_by(fn %Packet{pid: pid} -> pid end)
-    |> Enum.reduce(state, fn {pid, packets}, state ->
-      # WARNING: we're not limiting the number of streams we're tracking.
-      queue =
-        state.demuxed_queues
-        |> Map.get_lazy(pid, fn -> StreamQueue.new(pid) end)
-        |> StreamQueue.push_es_packets(packets)
+  defp demux_packets(state, [pkt | pkts], acc) when is_map_key(state.streams, pkt.pid) do
+    # This is a PES packet.
+    {pes, state} =
+      get_and_update_in(state, [:stream_aggregators, pkt.pid], fn queue ->
+        StreamAggregator.put_and_get(queue, pkt)
+      end)
 
-      put_in(state, [Access.key!(:demuxed_queues), pid], queue)
-    end)
+    acc = Enum.reduce(pes, acc, fn x, acc -> [x | acc] end)
+    demux_packets(state, pkts, acc)
   end
 
-  defp parse_buffer(buffer) do
+  defp demux_packets(_state, [pkt | _pkts], _acc) do
+    # This packet does not belong to any PES stream we know
+    IO.inspect(pkt, label: "UNIMPLEMNTED")
+    raise ArgumentError, "not implemented"
+  end
+
+  defp handle_pat(pkt, state) do
+    with {:ok, pat} <- PAT.unmarshal(pkt.payload, pkt.pusi) do
+      state =
+        state
+        |> put_in([Access.key!(:pat)], pat)
+        |> update_in([Access.key!(:pids_with_pmt)], fn old ->
+          pat.programs
+          |> Enum.map(fn {k, v} -> {v, k} end)
+          |> Map.new()
+          |> then(fn x -> Map.merge(old, x) end)
+        end)
+
+      {pat, state}
+    else
+      {:error, reason} -> raise Error, %{reason: reason, data: pkt.payload}
+    end
+  end
+
+  def flush(state) do
+    pkts =
+      state.stream_aggregators
+      |> Enum.flat_map(fn aggregator ->
+        {pes, _} = StreamAggregator.flush(aggregator)
+        pes
+      end)
+
+    {pkts, new()}
+  end
+
+  defp parse_packets(buffer) do
     {ok, err} =
       buffer
       |> Packet.parse_many()
@@ -188,8 +166,8 @@ defmodule MPEG.TS.Demuxer do
       end)
 
     if critical_err != nil do
-      raise ArgumentError,
-            "MPEG-TS unrecoverable parse error: #{inspect(critical_err, limit: :infinity)}"
+      {:error, reason, data} = critical_err
+      raise Error, %{reason: reason, data: data}
     end
 
     to_buffer =
