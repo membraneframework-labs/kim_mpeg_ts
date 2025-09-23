@@ -71,6 +71,8 @@ defmodule MPEG.TS.Demuxer do
     |> Enum.map(fn x -> x.payload end)
   end
 
+  def available_streams(state), do: state.streams
+
   def stream!(stream, opts \\ []) do
     Stream.transform(
       stream,
