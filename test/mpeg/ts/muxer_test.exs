@@ -84,19 +84,25 @@ defmodule MPEG.TS.MuxerTest do
     {video_packets, muxer} =
       Muxer.mux_sample(muxer, video_pid, video_sample, 0, sync?: true, send_pcr?: true)
 
-    {audio_packets, muxer} = Muxer.mux_sample(muxer, audio_pid, audio_sample, 0)
+    {audio_packets, muxer} = Muxer.mux_sample(muxer, audio_pid, audio_sample, 0, sync?: true)
 
     packets = [pat, pmt] ++ video_packets ++ audio_packets
     {video_packets, muxer} = Muxer.mux_sample(muxer, video_pid, video_sample, 18000)
-    {audio_packets, _muxer} = Muxer.mux_sample(muxer, audio_pid, audio_sample, 9000)
+    {audio_packets, _muxer} = Muxer.mux_sample(muxer, audio_pid, audio_sample, 9000, sync?: true)
 
     packets = packets ++ video_packets ++ audio_packets
-    data = Marshaler.marshal(packets) |> IO.iodata_to_binary()
+    data = Marshaler.marshal(packets)
 
-    demuxer =
-      Demuxer.new()
-      |> Demuxer.push_buffer(data)
-      |> Demuxer.end_of_stream()
+    units =
+      data
+      |> Stream.map(fn x -> IO.iodata_to_binary(x) end)
+      |> Demuxer.stream!(strict?: true)
+      |> Enum.into([])
+
+    pmt =
+      units
+      |> Demuxer.filter(4096)
+      |> List.first()
 
     assert %PMT{
              pcr_pid: ^video_pid,
@@ -105,10 +111,10 @@ defmodule MPEG.TS.MuxerTest do
                ^video_pid => %{stream_type: :H264_AVC, stream_type_id: 27},
                ^audio_pid => %{stream_type: :AAC_ADTS, stream_type_id: 15}
              }
-           } = demuxer.pmt
+           } = pmt
 
-    assert {[video_sample1, video_sample2], demuxer} = Demuxer.take(demuxer, video_pid, 2)
-    assert {[audio_sample1, audio_sample2], demuxer} = Demuxer.take(demuxer, audio_pid, 2)
+    assert [video_sample1, video_sample2] = Demuxer.filter(units, video_pid)
+    assert [audio_sample1, audio_sample2] = Demuxer.filter(units, audio_pid)
 
     for sample <- [video_sample1, video_sample2] do
       assert sample.data == video_sample
@@ -121,8 +127,5 @@ defmodule MPEG.TS.MuxerTest do
       assert sample.pts == sample.dts
       assert sample.stream_id == 0xC0
     end
-
-    assert {[], demuxer} = Demuxer.take(demuxer, video_pid, 1)
-    assert {[], _demuxer} = Demuxer.take(demuxer, audio_pid, 1)
   end
 end

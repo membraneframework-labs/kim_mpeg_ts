@@ -35,8 +35,8 @@ defmodule MPEG.TS.StreamAggregator do
 
     state =
       state
-      |> update_in(Access.key!([:acc]), fn q -> :queue.in(pes, q) end)
-      |> put_in(Access.key!([:rai?]), true)
+      |> update_in([Access.key!(:acc)], fn q -> :queue.in(pes, q) end)
+      |> put_in([Access.key!(:rai?)], true)
 
     {[], state}
   end
@@ -91,8 +91,7 @@ defmodule MPEG.TS.StreamAggregator do
           raise Error, "PES group contains multiple stream_id: #{inspect(stream_ids)}"
 
         leader.length == 0 ->
-          # TODO: trim trailing stuffing bits? Seems to make no difference and its a
-          # quite expensive process.
+          # TODO: trim trailing stuffing bits? Seems to make no difference.
           payload
 
         payload_size > leader.length ->
