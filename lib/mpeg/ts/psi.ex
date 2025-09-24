@@ -2,6 +2,7 @@ defmodule MPEG.TS.PSI do
   @behaviour MPEG.TS.Unmarshaler
 
   alias MPEG.TS.{PAT, PMT, SCTE35}
+  require Logger
 
   @moduledoc """
   Program Specific Information payload. Supported tables are PMT and PAT.
@@ -35,15 +36,30 @@ defmodule MPEG.TS.PSI do
       content_length = header.section_length - @crc_length - header_overhead
 
       with <<raw_data::binary-size(content_length), crc::@crc_length-binary, _::binary>> <- data,
-           table_type = table_id_to_type(header.table_id),
-           {:ok, table} <- unmarshal_table(raw_data, table_type, is_start_unit) do
-        {:ok,
-         %__MODULE__{
-           header: header,
-           table_type: table_type,
-           table: table,
-           crc: crc
-         }}
+           table_type = table_id_to_type(header.table_id) do
+        case unmarshal_table(raw_data, table_type, is_start_unit) do
+          {:ok, table} ->
+            {:ok,
+             %__MODULE__{
+               header: header,
+               table_type: table_type,
+               table: table,
+               crc: crc
+             }}
+
+          {:error, reason} ->
+            # It means we were not able to parse PSI contents. To be as resilient as possible, we prefer
+            # going on.
+            Logger.warning("Unable to unmarshal PSI: #{inspect(reason)} -- forwarding RAW table")
+
+            {:ok,
+             %__MODULE__{
+               header: header,
+               table_type: table_type,
+               table: raw_data,
+               crc: crc
+             }}
+        end
       else
         _ ->
           {:error, :invalid_data}
@@ -66,13 +82,12 @@ defmodule MPEG.TS.PSI do
   def unmarshal_header(<<
         table_id::8,
         section_syntax_indicator::1,
-        0::1,
-        _r1::2,
-        # section length starts with 00
-        0::2,
-        section_length::10,
+        _private_bit::1,
+        _sap_type::2,
+        section_length::12,
         rest::binary
-      >>) do
+      >>)
+      when section_length <= 4093 do
     case section_syntax_indicator do
       1 -> unmarshal_long_header(table_id, section_length, rest)
       0 -> unmarshal_short_header(table_id, section_length, rest)
@@ -90,8 +105,10 @@ defmodule MPEG.TS.PSI do
   end
 
   defp unmarshal_table(data, :scte35, is_unit_start) do
-    IO.inspect(data, label: "SCTE35 TAB", base: :hex, limit: :infinity)
     SCTE35.unmarshal(data, is_unit_start)
+  rescue
+    _e ->
+      {:error, :scte35_unmarshal_error}
   end
 
   defp unmarshal_table(data, _table_type, _is_unit_start), do: {:ok, data}
