@@ -99,9 +99,15 @@ defmodule MPEG.TS.SCTE35 do
               do: <<cmd.break_duration.auto_return::1, 1::6, cmd.break_duration.duration::33>>,
               else: <<>>
 
-          [header, info, splice_time, break_duration, <<cmd.unique_program_id::16, 0::8, 0::8>>]
+          IO.iodata_to_binary([
+            header,
+            info,
+            splice_time,
+            break_duration,
+            <<cmd.unique_program_id::16, 0::8, 0::8>>
+          ])
         else
-          [header]
+          header
         end
       end
     end
@@ -227,18 +233,13 @@ defmodule MPEG.TS.SCTE35 do
       :bandwidth_reservation => 0x07
     }
     def marshal(scte = %MPEG.TS.SCTE35{}) do
-      dbg(scte)
-
-      header =
-        <<scte.protocol_version::8, scte.encrypted_packet::1, scte.encryption_algorithm::6,
-          scte.pts_adjustment::33, scte.cw_index::8, scte.tier::12>>
-
       splice_command = MPEG.TS.Marshaler.marshal(scte.splice_command)
       splice_command_type = @splice_id_to_type[scte.splice_command_type]
       splice_command_size = IO.iodata_length(splice_command) + 8
 
-      command = [<<splice_command_size::12, splice_command_type::8>>, splice_command]
-      [header, command, <<0::16, 0::32>>]
+      <<scte.protocol_version::8, scte.encrypted_packet::1, scte.encryption_algorithm::6,
+        scte.pts_adjustment::33, scte.cw_index::8, scte.tier::12, splice_command_size::12,
+        splice_command_type::8>> <> splice_command <> <<0::16, 0::32>>
     end
   end
 end
