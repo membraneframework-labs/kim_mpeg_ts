@@ -1,25 +1,25 @@
 defmodule MPEG.TS.MuxerTest do
   use ExUnit.Case, async: true
 
-  alias MPEG.TS.{Demuxer, Marshaler, Muxer, Packet, PAT, PMT}
+  alias MPEG.TS.{Demuxer, Marshaler, Muxer, Packet, PAT, PMT, PSI}
 
   setup do
     {:ok, muxer: Muxer.new()}
   end
 
   test "Mux PAT table", %{muxer: muxer} do
-    {%Packet{pid: 0, pusi: true, continuity_counter: 0, payload: raw_pat}, _muxer} =
+    {%Packet{pid: 0, pusi: true, continuity_counter: 0, payload: raw_psi}, _muxer} =
       Muxer.mux_pat(muxer)
 
-    assert {:ok, %PAT{programs: %{1 => 0x1000}}} = PAT.unmarshal(raw_pat, true)
+    assert {:ok, %PSI{table: %PAT{programs: %{1 => 0x1000}}}} = PSI.unmarshal(raw_psi, true)
   end
 
   test "Mux PMT table", %{muxer: muxer} do
-    {%Packet{pid: 0x1000, pusi: true, continuity_counter: 0, payload: raw_pmt}, muxer} =
+    {%Packet{pid: 0x1000, pusi: true, continuity_counter: 0, payload: raw_psi}, muxer} =
       Muxer.mux_pmt(muxer)
 
-    assert {:ok, %PMT{pcr_pid: 0x1FFF, program_info: [], streams: %{}}} =
-             PMT.unmarshal(raw_pmt, true)
+    assert {:ok, %PSI{table: %PMT{pcr_pid: 0x1FFF, program_info: [], streams: %{}}}} =
+             PSI.unmarshal(raw_psi, true)
 
     {pid1, muxer} = Muxer.add_elementary_stream(muxer, PMT.encode_stream_type(:H264_AVC), true)
     {pid2, muxer} = Muxer.add_elementary_stream(muxer, PMT.encode_stream_type(:AAC_ADTS))
@@ -27,18 +27,20 @@ defmodule MPEG.TS.MuxerTest do
     assert pid1 == 0x100
     assert pid2 == 0x101
 
-    {%Packet{pid: 0x1000, pusi: true, continuity_counter: 1, payload: raw_pmt}, _muxer} =
+    {%Packet{pid: 0x1000, pusi: true, continuity_counter: 1, payload: raw_psi}, _muxer} =
       Muxer.mux_pmt(muxer)
 
     assert {:ok,
-            %PMT{
-              pcr_pid: 0x100,
-              program_info: [],
-              streams: %{
-                0x100 => %{stream_type: :H264_AVC, stream_type_id: 27},
-                0x101 => %{stream_type: :AAC_ADTS, stream_type_id: 15}
+            %PSI{
+              table: %PMT{
+                pcr_pid: 0x100,
+                program_info: [],
+                streams: %{
+                  0x100 => %{stream_type: :H264_AVC, stream_type_id: 27},
+                  0x101 => %{stream_type: :AAC_ADTS, stream_type_id: 15}
+                }
               }
-            }} = PMT.unmarshal(raw_pmt, true)
+            }} = PSI.unmarshal(raw_psi, true)
   end
 
   test "Mux PCR", %{muxer: muxer} do
@@ -111,7 +113,7 @@ defmodule MPEG.TS.MuxerTest do
                ^video_pid => %{stream_type: :H264_AVC, stream_type_id: 27},
                ^audio_pid => %{stream_type: :AAC_ADTS, stream_type_id: 15}
              }
-           } = pmt
+           } = pmt.table
 
     assert [video_sample1, video_sample2] = Demuxer.filter(units, video_pid)
     assert [audio_sample1, audio_sample2] = Demuxer.filter(units, audio_pid)

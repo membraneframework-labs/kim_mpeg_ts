@@ -22,19 +22,6 @@ defmodule MPEG.TS.PartialPES do
   require Logger
 
   @impl true
-  def is_unmarshable?(_data, false) do
-    true
-  end
-
-  def is_unmarshable?(<<1::24, _stream_id::8, _length::16, _optional::bitstring>>, true) do
-    true
-  end
-
-  def is_unmarshable?(_data, _true) do
-    false
-  end
-
-  @impl true
   def unmarshal(
         <<1::24, stream_id::8, packet_length::16, optional_fields::binary>>,
         true

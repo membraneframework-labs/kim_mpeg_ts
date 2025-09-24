@@ -1,8 +1,6 @@
 defmodule MPEG.TS.PMT do
   @behaviour MPEG.TS.Unmarshaler
 
-  alias MPEG.TS.PSI
-
   @moduledoc """
   Program Map Table.
   """
@@ -28,21 +26,12 @@ defmodule MPEG.TS.PMT do
         }
 
   @impl true
-  def is_unmarshable?(data, is_start_unit = true) do
-    case PSI.unmarshal_header(data, is_start_unit) do
-      {:ok, {%{table_id: 0x02}, _rest}} -> true
-      _ -> false
-    end
+  def unmarshal(data, true) do
+    unmarshal_table(data)
   end
 
-  def is_unmarshable?(_data, false), do: false
-
-  @impl true
-  def unmarshal(data, is_start_unit) do
-    with {:ok, %PSI{table: table}} <- PSI.unmarshal(data, is_start_unit),
-         {:ok, table} <- unmarshal_table(table) do
-      {:ok, table}
-    end
+  def unmarshal(_, _) do
+    {:error, :invalid_data}
   end
 
   @spec unmarshal_table(binary()) :: {:ok, t()} | {:error, :invalid_data}

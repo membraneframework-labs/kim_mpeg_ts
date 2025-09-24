@@ -14,7 +14,12 @@ defmodule MPEG.TS.DemuxerTest do
 
   test "finds PMT table" do
     units = demux_file!(@avsync)
-    pmt = Enum.find(units, fn %{payload: %mod{}} -> mod == MPEG.TS.PMT end)
+
+    container =
+      Enum.find(units, fn
+        %{payload: %MPEG.TS.PSI{table_type: :pmt}} -> true
+        _ -> false
+      end)
 
     assert %MPEG.TS.PMT{
              pcr_pid: 256,
@@ -23,7 +28,7 @@ defmodule MPEG.TS.DemuxerTest do
                256 => %{stream_type: :H264_AVC, stream_type_id: 27},
                257 => %{stream_type: :AAC_ADTS, stream_type_id: 15}
              }
-           } == pmt.payload
+           } == container.payload.table
   end
 
   test "demuxes PES stream" do

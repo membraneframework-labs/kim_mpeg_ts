@@ -15,3 +15,7 @@ end
 defimpl MPEG.TS.Marshaler, for: List do
   def marshal(list), do: Enum.map(list, &MPEG.TS.Marshaler.marshal/1)
 end
+
+defimpl MPEG.TS.Marshaler, for: BitString do
+  def marshal(binary), do: binary
+end

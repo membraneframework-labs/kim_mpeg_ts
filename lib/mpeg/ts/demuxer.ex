@@ -28,9 +28,9 @@ defmodule MPEG.TS.Demuxer do
   end
 
   defmodule Container do
-    alias MPEG.TS.{PMT, PAT, PES, PSI}
+    alias MPEG.TS.{PES, PSI}
 
-    @type payload_t :: PES.t() | PMT.t() | PAT.t() | PSI.t()
+    @type payload_t :: PES.t() | PSI.t()
     @type t :: %__MODULE__{pid: MPEG.TS.Packet.pid_t(), payload: payload_t}
     defstruct [:pid, :payload]
     def new(payload, pid) when is_struct(payload), do: %__MODULE__{pid: pid, payload: payload}
@@ -144,44 +144,6 @@ defmodule MPEG.TS.Demuxer do
     demux_packets(state, pkts, acc)
   end
 
-  defp demux_packets(state, [pkt | pkts], acc) when pkt.pid == 0 do
-    # This PID contains the PAT.
-    {pat, state} = handle_pat(pkt, state)
-    demux_packets(state, pkts, [Container.new(pat, pkt.pid) | acc])
-  end
-
-  defp demux_packets(state, [pkt | pkts], acc) when is_map_key(state.pids_with_pmt, pkt.pid) do
-    # This packet carries a PMT table.
-    with {:ok, pmt} <- PMT.unmarshal(pkt.payload, pkt.pusi) do
-      state =
-        state
-        |> update_in([Access.key!(:streams)], &Map.merge(&1, pmt.streams))
-        |> then(fn state ->
-          # Each stream that contains a PES stream should have its aggregator.
-          state.streams
-          |> Enum.filter(fn {_pid, stream} ->
-            PMT.get_stream_category(stream.stream_type) in [:audio, :video]
-          end)
-          |> Enum.reduce(state, fn {pid, _stream}, state ->
-            update_in(state, [Access.key!(:stream_aggregators), pid], fn
-              nil -> StreamAggregator.new()
-              queue -> queue
-            end)
-          end)
-        end)
-
-      demux_packets(state, pkts, [Container.new(pmt, pkt.pid) | acc])
-    else
-      {:error, reason} ->
-        if state.strict? do
-          raise Error, %{reason: reason, data: pkt.payload}
-        else
-          Logger.warning("PID #{pkt.pid}: error: #{inspect(reason)}")
-          demux_packets(state, pkts, acc)
-        end
-    end
-  end
-
   defp demux_packets(state, [pkt | pkts], acc)
        when is_map_key(state.stream_aggregators, pkt.pid) do
     # This is a PES packet.
@@ -204,26 +166,21 @@ defmodule MPEG.TS.Demuxer do
     demux_packets(state, pkts, acc)
   end
 
-  defp demux_packets(state, [pkt | pkts], acc) when pkt.pid_class == :psi do
-    # This is NOT a PMT packet but rather other PSI stuff.
-    # 
+  defp demux_packets(state, [pkt | pkts], acc)
+       when pkt.pid_class in [:psi, :pat] or is_map_key(state.pids_with_pmt, pkt.pid) do
     with {:ok, psi} <- PSI.unmarshal(pkt.payload, pkt.pusi) do
-      # Debug SCTE-35 packets
-      if psi.header.table_id == 0xFC do
-        psi
-        |> MPEG.TS.Marshaler.marshal()
-        |> Base.encode64()
-        |> IO.inspect(label: "RAW PSI")
+      state =
+        cond do
+          is_map_key(state.pids_with_pmt, pkt.pid) and psi.table_type == :pmt ->
+            handle_pmt(psi.table, state)
 
-        case PSI.to_scte35_base64(psi) do
-          {:error, _} ->
-            :ok
+          pkt.pid_class == :pat and psi.table_type == :pat ->
+            handle_pat(psi.table, state)
 
-          full_section ->
-            IO.puts("SCTE-35 on PID #{pkt.pid}:")
-            IO.puts("  Full section: #{full_section}")
+          true ->
+            # We just forward the PSI packet as is.
+            state
         end
-      end
 
       demux_packets(state, pkts, [Container.new(psi, pkt.pid) | acc])
     else
@@ -237,34 +194,39 @@ defmodule MPEG.TS.Demuxer do
     end
   end
 
-  defp demux_packets(_state, [pkt | _pkts], _acc) do
+  defp demux_packets(state, [pkt | pkts], acc) do
     # This packet does not belong to any PES stream we know -- it might be
     # an unknown stream (we did not receive PMTs yet) or a PSI stream. 
-    IO.inspect(pkt, label: "UNIMPLEMNTED")
-    raise ArgumentError, "not implemented"
+    Logger.warning("Unexpected packet received: #{inspect(pkt)}")
+    demux_packets(state, pkts, acc)
   end
 
-  defp handle_pat(pkt, state) do
-    with {:ok, pat} <- PAT.unmarshal(pkt.payload, pkt.pusi) do
-      state =
-        state
-        |> update_in([Access.key!(:pids_with_pmt)], fn old ->
-          pat.programs
-          |> Enum.map(fn {k, v} -> {v, k} end)
-          |> Map.new()
-          |> then(fn x -> Map.merge(old, x) end)
-        end)
+  defp handle_pat(pat, state) do
+    state
+    |> update_in([Access.key!(:pids_with_pmt)], fn old ->
+      pat.programs
+      |> Enum.map(fn {k, v} -> {v, k} end)
+      |> Map.new()
+      |> then(fn x -> Map.merge(old, x) end)
+    end)
+  end
 
-      {pat, state}
-    else
-      {:error, reason} ->
-        if state.strict? do
-          raise Error, %{reason: reason, data: pkt.payload}
-        else
-          Logger.warning("PID #{pkt.pid}: error: #{inspect(reason)}")
-          {[], state}
-        end
-    end
+  defp handle_pmt(pmt, state) do
+    state
+    |> update_in([Access.key!(:streams)], &Map.merge(&1, pmt.streams))
+    |> then(fn state ->
+      # Each stream that contains a PES stream should have its aggregator.
+      state.streams
+      |> Enum.filter(fn {_pid, stream} ->
+        PMT.get_stream_category(stream.stream_type) in [:audio, :video]
+      end)
+      |> Enum.reduce(state, fn {pid, _stream}, state ->
+        update_in(state, [Access.key!(:stream_aggregators), pid], fn
+          nil -> StreamAggregator.new()
+          queue -> queue
+        end)
+      end)
+    end)
   end
 
   defp parse_packets(buffer) do
