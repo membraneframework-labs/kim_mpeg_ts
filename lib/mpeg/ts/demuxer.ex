@@ -31,9 +31,12 @@ defmodule MPEG.TS.Demuxer do
     alias MPEG.TS.{PES, PSI}
 
     @type payload_t :: PES.t() | PSI.t()
-    @type t :: %__MODULE__{pid: MPEG.TS.Packet.pid_t(), payload: payload_t}
-    defstruct [:pid, :payload]
-    def new(payload, pid) when is_struct(payload), do: %__MODULE__{pid: pid, payload: payload}
+    @type t :: %__MODULE__{
+            pid: MPEG.TS.Packet.pid_t(),
+            t: pos_integer(),
+            payload: payload_t
+          }
+    defstruct [:pid, :t, :payload]
   end
 
   require Logger
@@ -42,6 +45,9 @@ defmodule MPEG.TS.Demuxer do
           # When enabled, raises on invalid packets.
           strict?: boolean(),
           pending: binary(),
+          # Tracks the last pts/dts value found. This is used to assign timing information to PSI
+          # payloads, which might, or might not, carry it within their payloads.
+          last_t: pos_integer(),
           # Each PID that requires ES re-assemblement get's a queue here,
           # from which we extrac complete buffers.
           stream_aggregators: %{Packet.pid_t() => StreamAggregator.t()},
@@ -57,7 +63,8 @@ defmodule MPEG.TS.Demuxer do
             pids_with_pmt: %{},
             stream_aggregators: %{},
             streams: %{},
-            strict?: false
+            strict?: false,
+            last_t: 0
 
   @spec new() :: t()
   def new(opts \\ []) do
@@ -129,7 +136,15 @@ defmodule MPEG.TS.Demuxer do
               end
           end
 
-        pes = Enum.map(pes, fn x -> Container.new(x, pid) end)
+        pes =
+          Enum.map(pes, fn x ->
+            %Container{
+              pid: pid,
+              payload: x,
+              t: x.dts || x.pts
+            }
+          end)
+
         {pes, put_in(map, [pid], aggregator)}
       end)
     end)
@@ -162,7 +177,18 @@ defmodule MPEG.TS.Demuxer do
         end
       end)
 
-    acc = Enum.reduce(pes, acc, fn x, acc -> [Container.new(x, pkt.pid) | acc] end)
+    {acc, state} =
+      Enum.reduce(pes, {acc, state}, fn x, {acc, state} ->
+        container = %Container{
+          pid: pkt.pid,
+          payload: x,
+          t: x.dts || x.pts
+        }
+
+        state = put_in(state, [Access.key!(:last_t)], x.dts || x.pts)
+        {[container | acc], state}
+      end)
+
     demux_packets(state, pkts, acc)
   end
 
@@ -182,7 +208,13 @@ defmodule MPEG.TS.Demuxer do
             state
         end
 
-      demux_packets(state, pkts, [Container.new(psi, pkt.pid) | acc])
+      container = %Container{
+        pid: pkt.pid,
+        payload: psi,
+        t: state.last_t
+      }
+
+      demux_packets(state, pkts, [container | acc])
     else
       {:error, reason} ->
         if state.strict? do
