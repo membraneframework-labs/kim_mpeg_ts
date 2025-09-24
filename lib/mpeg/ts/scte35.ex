@@ -78,6 +78,33 @@ defmodule MPEG.TS.SCTE35 do
     end
 
     defp parse_break_duration(0, rest), do: {nil, rest}
+
+    defimpl MPEG.TS.Marshaler do
+      def marshal(cmd = %MPEG.TS.SCTE35.SpliceInsert{}) do
+        header = <<cmd.event_id::32, cmd.cancel_indicator::1, 1::7>>
+
+        if cmd.cancel_indicator == 0 do
+          break_duration_flag = if cmd.break_duration, do: 1, else: 0
+          immediate_flag = if cmd.splice_time, do: 0, else: 1
+
+          info =
+            <<cmd.out_of_network_indicator::1, 1::1, break_duration_flag::1, immediate_flag::1,
+              cmd.event_id_compliance_flag::1, 1::3>>
+
+          splice_time =
+            if immediate_flag == 0, do: <<1::1, 1::6, cmd.splice_time.pts::33>>, else: <<>>
+
+          break_duration =
+            if break_duration_flag == 1,
+              do: <<cmd.break_duration.auto_return::1, 1::6, cmd.break_duration.duration::33>>,
+              else: <<>>
+
+          [header, info, splice_time, break_duration, <<cmd.unique_program_id::16, 0::8, 0::8>>]
+        else
+          [header]
+        end
+      end
+    end
   end
 
   @type splice_command_type_t ::
@@ -104,7 +131,7 @@ defmodule MPEG.TS.SCTE35 do
 
   @type t :: %__MODULE__{
           protocol_version: 0..255,
-          encrypted_packet: boolean(),
+          encrypted_packet: pos_integer(),
           encryption_algorithm: 0..63,
           pts_adjustment: integer(),
           cw_index: 0..255,
@@ -142,7 +169,7 @@ defmodule MPEG.TS.SCTE35 do
       {:ok,
        %__MODULE__{
          protocol_version: protocol_version,
-         encrypted_packet: encrypted_packet_flag == 1,
+         encrypted_packet: encrypted_packet_flag,
          encryption_algorithm: encryption_algorithm,
          pts_adjustment: parse_pts_adjustment(pts_adjustment),
          cw_index: cw_index,
@@ -162,17 +189,25 @@ defmodule MPEG.TS.SCTE35 do
 
   defp parse_pts_adjustment(base), do: base * 300
 
-  defp parse_splice_command_type(0x00), do: :splice_null
-  defp parse_splice_command_type(0x04), do: :splice_schedule
-  defp parse_splice_command_type(0x05), do: :splice_insert
-  defp parse_splice_command_type(0x06), do: :time_signal
-  defp parse_splice_command_type(0x07), do: :bandwidth_reservation
-  defp parse_splice_command_type(_), do: :private_command
+  @splice_type_to_id %{
+    0x00 => :splice_null,
+    0x04 => :splice_schedule,
+    0x05 => :splice_insert,
+    0x06 => :time_signal,
+    0x07 => :bandwidth_reservation
+  }
+
+  defp parse_splice_command_type(type) do
+    if id = @splice_type_to_id[type] do
+      {:ok, id}
+    else
+      {:error, :unknown_splice_type}
+    end
+  end
 
   defp unmarshal_splice_info_section(<<command_type::8, rest::binary>>) do
-    command_type = parse_splice_command_type(command_type)
-
-    with {:ok, command} <- parse_splice_command(command_type, rest) do
+    with {:ok, command_type} <- parse_splice_command_type(command_type),
+         {:ok, command} <- parse_splice_command(command_type, rest) do
       {:ok, {command_type, command}}
     else
       {:error, reason} -> {:error, reason}
@@ -182,4 +217,28 @@ defmodule MPEG.TS.SCTE35 do
   defp parse_splice_command(:splice_null, _data), do: {:ok, %{}}
   defp parse_splice_command(:splice_insert, data), do: SpliceInsert.unmarshal(data, true)
   defp parse_splice_command(_type, _data), do: {:error, :splice_command_not_implemented}
+
+  defimpl MPEG.TS.Marshaler do
+    @splice_id_to_type %{
+      :splice_null => 0x00,
+      :splice_schedule => 0x04,
+      :splice_insert => 0x05,
+      :time_signal => 0x06,
+      :bandwidth_reservation => 0x07
+    }
+    def marshal(scte = %MPEG.TS.SCTE35{}) do
+      dbg(scte)
+
+      header =
+        <<scte.protocol_version::8, scte.encrypted_packet::1, scte.encryption_algorithm::6,
+          scte.pts_adjustment::33, scte.cw_index::8, scte.tier::12>>
+
+      splice_command = MPEG.TS.Marshaler.marshal(scte.splice_command)
+      splice_command_type = @splice_id_to_type[scte.splice_command_type]
+      splice_command_size = IO.iodata_length(splice_command) + 8
+
+      command = [<<splice_command_size::12, splice_command_type::8>>, splice_command]
+      [header, command, <<0::16, 0::32>>]
+    end
+  end
 end
