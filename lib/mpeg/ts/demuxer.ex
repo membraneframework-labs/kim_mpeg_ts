@@ -206,14 +206,32 @@ defmodule MPEG.TS.Demuxer do
 
   defp demux_packets(state, [pkt | pkts], acc) when pkt.pid_class == :psi do
     # This is NOT a PMT packet but rather other PSI stuff.
+    # 
     with {:ok, psi} <- PSI.unmarshal(pkt.payload, pkt.pusi) do
+      # Debug SCTE-35 packets
+      if psi.header.table_id == 0xFC do
+        psi
+        |> MPEG.TS.Marshaler.marshal()
+        |> Base.encode64()
+        |> IO.inspect(label: "RAW PSI")
+
+        case PSI.to_scte35_base64(psi) do
+          {:error, _} ->
+            :ok
+
+          full_section ->
+            IO.puts("SCTE-35 on PID #{pkt.pid}:")
+            IO.puts("  Full section: #{full_section}")
+        end
+      end
+
       demux_packets(state, pkts, [Container.new(psi, pkt.pid) | acc])
     else
       {:error, reason} ->
         if state.strict? do
           raise Error, %{reason: reason, data: pkt.payload}
         else
-          Logger.warning("PID #{pkt.pid}: error: #{inspect(reason)}")
+          # Logger.warning("PID #{pkt.pid}: error: #{inspect(reason)}")
           demux_packets(state, pkts, acc)
         end
     end
