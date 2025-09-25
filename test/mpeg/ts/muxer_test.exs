@@ -21,8 +21,8 @@ defmodule MPEG.TS.MuxerTest do
     assert {:ok, %PSI{table: %PMT{pcr_pid: 0x1FFF, program_info: [], streams: %{}}}} =
              PSI.unmarshal(raw_psi, true)
 
-    {pid1, muxer} = Muxer.add_elementary_stream(muxer, PMT.encode_stream_type(:H264_AVC), true)
-    {pid2, muxer} = Muxer.add_elementary_stream(muxer, PMT.encode_stream_type(:AAC_ADTS))
+    {pid1, muxer} = Muxer.add_elementary_stream(muxer, :H264_AVC, true)
+    {pid2, muxer} = Muxer.add_elementary_stream(muxer, :AAC_ADTS)
 
     assert pid1 == 0x100
     assert pid2 == 0x101
@@ -44,12 +44,12 @@ defmodule MPEG.TS.MuxerTest do
   end
 
   test "Mux PCR", %{muxer: muxer} do
-    {pid, muxer} = Muxer.add_elementary_stream(muxer, PMT.encode_stream_type(:H264_AVC), true)
+    {pid, muxer} = Muxer.add_elementary_stream(muxer, :H264_AVC, true)
     {%Packet{payload: <<>>, pcr: 100, pid: ^pid}, _muxer} = Muxer.mux_pcr(muxer, 100)
   end
 
   test "Mux sample", %{muxer: muxer} do
-    {pid, muxer} = Muxer.add_elementary_stream(muxer, PMT.encode_stream_type(:H264_AVC), true)
+    {pid, muxer} = Muxer.add_elementary_stream(muxer, :H264_AVC, true)
 
     sample_payload = :binary.copy(<<1>>, 1000)
     pts = 90000
@@ -71,11 +71,34 @@ defmodule MPEG.TS.MuxerTest do
     end
   end
 
+  test "mux SCTE35", %{muxer: muxer} do
+    {pid, muxer} = Muxer.add_elementary_stream(muxer, :SCTE_35_SPLICE)
+    table = Support.Factory.scte35()
+
+    psi = %MPEG.TS.PSI{
+      header: %{
+        table_id: 0xFC,
+        section_syntax_indicator: false
+      },
+      table: table
+    }
+
+    {packet, muxer} = Muxer.mux_psi(muxer, pid, psi)
+
+    assert muxer.pmt == %MPEG.TS.PMT{
+             pcr_pid: nil,
+             program_info: [],
+             streams: %{256 => %{stream_type: :SCTE_35_SPLICE, stream_type_id: 134}}
+           }
+
+    assert packet.payload != ""
+  end
+
   test "Mux and demux", %{muxer: muxer} do
     {video_pid, muxer} =
-      Muxer.add_elementary_stream(muxer, PMT.encode_stream_type(:H264_AVC), true)
+      Muxer.add_elementary_stream(muxer, :H264_AVC, true)
 
-    {audio_pid, muxer} = Muxer.add_elementary_stream(muxer, PMT.encode_stream_type(:AAC_ADTS))
+    {audio_pid, muxer} = Muxer.add_elementary_stream(muxer, :AAC_ADTS)
 
     {pat, muxer} = Muxer.mux_pat(muxer)
     {pmt, muxer} = Muxer.mux_pmt(muxer)

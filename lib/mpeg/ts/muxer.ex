@@ -40,16 +40,18 @@ defmodule MPEG.TS.Muxer do
   @doc """
   Add a new elementary stream.
   """
-  @spec add_elementary_stream(t(), PMT.stream_type_id_t(), boolean()) :: {Packet.pid_t(), t()}
-  def add_elementary_stream(%__MODULE__{pmt: pmt} = muxer, stream_type_id, pcr? \\ false) do
+  @spec add_elementary_stream(t(), atom(), boolean()) :: {Packet.pid_t(), t()}
+  def add_elementary_stream(%__MODULE__{pmt: pmt} = muxer, stream_type, pcr? \\ false) do
     stream_size = map_size(pmt.streams)
-    stream_type = PMT.get_stream_category_by_id(stream_type_id)
+    stream_type_id = PMT.encode_stream_type(stream_type)
+    stream_category = PMT.get_stream_category_by_id(stream_type_id)
+
     streams_by_type = Enum.count(pmt.streams, fn {_pid, s} -> s.stream_type == stream_type end)
 
     pid = @start_pid + stream_size
 
     stream_id =
-      case stream_type do
+      case stream_category do
         :video -> 0xE0 + streams_by_type
         :audio -> 0xC0 + streams_by_type
         :subtitles -> 0xBD
@@ -104,7 +106,6 @@ defmodule MPEG.TS.Muxer do
 
     packet =
       psi
-      |> update_in([Access.key!(:table)], &Marshaler.marshal/1)
       |> Marshaler.marshal()
       |> Packet.new(
         pid: pid,
