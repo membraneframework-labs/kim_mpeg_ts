@@ -1,8 +1,6 @@
 defmodule MPEG.TS.PartialPES do
   @behaviour MPEG.TS.Unmarshaler
 
-  @ts_clock_hz 90_000
-
   @moduledoc """
   Partial Packetized Elemetary Stream. PES packets are much larger in size than
   TS packets are. This means that they have to be unmarshaled from a series of
@@ -159,6 +157,6 @@ defmodule MPEG.TS.PartialPES do
     # interpreted as a binary and hence an integer.
     # PTS and DTS originate from a 90kHz clock.
     <<ts::40>> = <<0b0::7, chunk_one::bitstring, chunk_two::bitstring, chunk_three::bitstring>>
-    div(ts * 1_000_000_000, @ts_clock_hz)
+    MPEG.TS.convert_ts_to_ns(ts)
   end
 end

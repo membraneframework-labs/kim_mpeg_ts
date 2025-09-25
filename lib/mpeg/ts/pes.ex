@@ -52,6 +52,7 @@ defmodule MPEG.TS.PES do
     end
 
     defp marshal_timestamp(prefix, timestamp) do
+      timestamp = MPEG.TS.convert_ns_to_ts(timestamp)
       chunk1 = Bitwise.bsr(timestamp, 30)
       chunk2 = Bitwise.bsr(timestamp, 15) |> Bitwise.band(0x7FFF)
       chunk3 = Bitwise.band(timestamp, 0x7FFF)

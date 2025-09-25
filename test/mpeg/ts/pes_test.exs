@@ -9,17 +9,20 @@ defmodule MPEG.TS.PESTest do
 
   describe "marshal a PES packet" do
     test "marshal a PES packet" do
-      pes = PES.new(@payload, stream_id: 224, dts: 900, pts: 1800)
+      pts = MPEG.TS.convert_ts_to_ns(1800)
+      dts = MPEG.TS.convert_ts_to_ns(900)
+      pes = PES.new(@payload, stream_id: 224, dts: dts, pts: pts)
       assert Marshaler.marshal(pes) == @pes_payload
 
-      assert {:ok, %PartialPES{data: @payload, stream_id: 224, dts: 10_000_000, pts: 20_000_000}} =
+      assert {:ok, %PartialPES{data: @payload, stream_id: 224, dts: ^dts, pts: ^pts}} =
                PartialPES.unmarshal(@pes_payload, true)
     end
 
     test "marshal a PES with only pts" do
-      pes_payload = PES.new(@payload, stream_id: 224, pts: 1800) |> Marshaler.marshal()
+      pts = MPEG.TS.convert_ts_to_ns(1800)
+      pes_payload = PES.new(@payload, stream_id: 224, pts: pts) |> Marshaler.marshal()
 
-      assert {:ok, %PartialPES{data: @payload, stream_id: 224, dts: 20_000_000, pts: 20_000_000}} =
+      assert {:ok, %PartialPES{data: @payload, stream_id: 224, dts: ^pts, pts: ^pts}} =
                PartialPES.unmarshal(pes_payload, true)
     end
 
