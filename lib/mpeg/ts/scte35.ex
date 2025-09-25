@@ -14,6 +14,9 @@ defmodule MPEG.TS.SCTE35 do
       :event_id,
       :cancel_indicator,
       :out_of_network_indicator,
+      :program_splice_flag,
+      :duration_flag,
+      :splice_immediate_flag,
       :event_id_compliance_flag,
       :splice_time,
       :break_duration,
@@ -43,37 +46,40 @@ defmodule MPEG.TS.SCTE35 do
              break_duration_flag::1,
              splice_immediate_flag::1,
              event_id_compliance_flag::1,
-             _reserved::3,
+             0b111::3,
              rest::binary
            >>
          ) do
       {splice_time, rest} = parse_splice_time(splice_immediate_flag, rest)
       {break_duration, rest} = parse_break_duration(break_duration_flag, rest)
-      <<unique_program_id::16, _rest::binary>> = rest
+
+      <<unique_program_id::16, avail_num::8, avails_expected::8>> = rest
 
       cmd
       |> put_in([Access.key!(:out_of_network_indicator)], out_of_network_indicator)
+      |> put_in([Access.key!(:program_splice_flag)], 1)
+      |> put_in([Access.key!(:duration_flag)], break_duration_flag)
+      |> put_in([Access.key!(:splice_immediate_flag)], splice_immediate_flag)
       |> put_in([Access.key!(:event_id_compliance_flag)], event_id_compliance_flag)
       |> put_in([Access.key!(:splice_time)], splice_time)
       |> put_in([Access.key!(:break_duration)], break_duration)
       |> put_in([Access.key!(:unique_program_id)], unique_program_id)
-      # TODO: notice that avails should appear in the 2 bytes of rest, but we found
-      # markers w/o them. It does not seem critical, hence we're skipping them.
-      |> put_in([Access.key!(:avail_num)], 0)
-      |> put_in([Access.key!(:avails_expected)], 0)
+      |> put_in([Access.key!(:avail_num)], avail_num)
+      |> put_in([Access.key!(:avails_expected)], avails_expected)
     end
 
     defp parse_event_cancel_section(cmd, _), do: cmd
 
-    defp parse_splice_time(0, <<1::1, _reserved::6, pts_time::33, rest::binary>>) do
-      {%{pts: pts_time}, rest}
-    end
+    defp parse_splice_time(0, <<1::1, 0b111111::6, pts_time::33, rest::binary>>),
+      do: {%{pts: pts_time}, rest}
 
-    defp parse_splice_time(1, <<0::1, _reserved::7, rest::binary>>) do
-      {nil, rest}
-    end
+    defp parse_splice_time(0, <<0::1, 0b1111111::7, rest::binary>>), do: {nil, rest}
+    defp parse_splice_time(1, rest), do: {nil, rest}
 
-    defp parse_break_duration(1, <<auto_return::1, _reserved::6, duration::33, rest::binary>>) do
+    defp parse_break_duration(
+           1,
+           <<auto_return::1, 0b111111::6, duration::33, rest::binary>>
+         ) do
       {%{auto_return: auto_return, duration: duration}, rest}
     end
 
@@ -81,22 +87,23 @@ defmodule MPEG.TS.SCTE35 do
 
     defimpl MPEG.TS.Marshaler do
       def marshal(cmd = %MPEG.TS.SCTE35.SpliceInsert{}) do
-        header = <<cmd.event_id::32, cmd.cancel_indicator::1, 1::7>>
+        header = <<cmd.event_id::32, cmd.cancel_indicator::1, 0b1111111::7>>
 
         if cmd.cancel_indicator == 0 do
-          break_duration_flag = if cmd.break_duration, do: 1, else: 0
-          immediate_flag = if cmd.splice_time, do: 0, else: 1
-
           info =
-            <<cmd.out_of_network_indicator::1, 1::1, break_duration_flag::1, immediate_flag::1,
-              cmd.event_id_compliance_flag::1, 1::3>>
+            <<cmd.out_of_network_indicator::1, cmd.program_splice_flag::1, cmd.duration_flag::1,
+              cmd.splice_immediate_flag::1, cmd.event_id_compliance_flag::1, 0b111::3>>
 
           splice_time =
-            if immediate_flag == 0, do: <<1::1, 1::6, cmd.splice_time.pts::33>>, else: <<>>
+            if cmd.program_splice_flag == 1 and cmd.splice_immediate_flag == 0,
+              do: <<1::1, 0b111111::6, cmd.splice_time.pts::33>>,
+              else: <<>>
 
           break_duration =
-            if break_duration_flag == 1,
-              do: <<cmd.break_duration.auto_return::1, 1::6, cmd.break_duration.duration::33>>,
+            if cmd.duration_flag == 1,
+              do:
+                <<cmd.break_duration.auto_return::1, 0b111111::6,
+                  cmd.break_duration.duration::33>>,
               else: <<>>
 
           IO.iodata_to_binary([
@@ -104,7 +111,7 @@ defmodule MPEG.TS.SCTE35 do
             info,
             splice_time,
             break_duration,
-            <<cmd.unique_program_id::16, 0::8, 0::8>>
+            <<cmd.unique_program_id::16, cmd.avail_num::8, cmd.avails_expected::8>>
           ])
         else
           header
@@ -166,25 +173,35 @@ defmodule MPEG.TS.SCTE35 do
         cw_index::8,
         tier::12,
         splice_command_length::12,
+        splice_command_type::8,
         splice_info_section::binary-size(splice_command_length),
         descriptor_loop_length::16,
         _descriptor_loop::binary-size(descriptor_loop_length),
-        _rest::binary
+        rest::binary
       >>) do
-    with {:ok, {command_type, command}} <- unmarshal_splice_info_section(splice_info_section) do
+    with {:ok, command_type} <- parse_splice_command_type(splice_command_type),
+         {:ok, command} <- parse_splice_command(command_type, splice_info_section) do
+      e_crc32 =
+        if encrypted_packet_flag == 1 do
+          <<e_crc32::4-binary>> = rest
+          e_crc32
+        else
+          <<>> = rest
+        end
+
       {:ok,
        %__MODULE__{
          protocol_version: protocol_version,
          encrypted_packet: encrypted_packet_flag,
          encryption_algorithm: encryption_algorithm,
-         pts_adjustment: parse_pts_adjustment(pts_adjustment),
+         pts_adjustment: pts_adjustment,
          cw_index: cw_index,
          tier: tier,
          splice_command_type: command_type,
          splice_command: command,
          # TODO: we're not parsing the descriptors!
          splice_descriptors: [],
-         e_crc32: <<>>
+         e_crc32: e_crc32
        }}
     else
       {:error, reason} -> {:error, reason}
@@ -192,8 +209,6 @@ defmodule MPEG.TS.SCTE35 do
   end
 
   def unmarshal_table(_), do: {:error, :invalid_data}
-
-  defp parse_pts_adjustment(base), do: base * 300
 
   @splice_type_to_id %{
     0x00 => :splice_null,
@@ -211,15 +226,6 @@ defmodule MPEG.TS.SCTE35 do
     end
   end
 
-  defp unmarshal_splice_info_section(<<command_type::8, rest::binary>>) do
-    with {:ok, command_type} <- parse_splice_command_type(command_type),
-         {:ok, command} <- parse_splice_command(command_type, rest) do
-      {:ok, {command_type, command}}
-    else
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
   defp parse_splice_command(:splice_null, _data), do: {:ok, %{}}
   defp parse_splice_command(:splice_insert, data), do: SpliceInsert.unmarshal(data, true)
   defp parse_splice_command(_type, _data), do: {:error, :splice_command_not_implemented}
@@ -232,14 +238,17 @@ defmodule MPEG.TS.SCTE35 do
       :time_signal => 0x06,
       :bandwidth_reservation => 0x07
     }
-    def marshal(scte = %MPEG.TS.SCTE35{}) do
+    def marshal(scte = %MPEG.TS.SCTE35{splice_descriptors: []}) do
       splice_command = MPEG.TS.Marshaler.marshal(scte.splice_command)
       splice_command_type = @splice_id_to_type[scte.splice_command_type]
-      splice_command_size = IO.iodata_length(splice_command) + 8
+      splice_command_size = IO.iodata_length(splice_command)
+
+      descriptor_loop_length = 0
 
       <<scte.protocol_version::8, scte.encrypted_packet::1, scte.encryption_algorithm::6,
         scte.pts_adjustment::33, scte.cw_index::8, scte.tier::12, splice_command_size::12,
-        splice_command_type::8>> <> splice_command <> <<0::16, 0::32>>
+        splice_command_type::8>> <>
+        splice_command <> <<descriptor_loop_length::16>> <> scte.e_crc32
     end
   end
 end

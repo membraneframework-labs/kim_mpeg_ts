@@ -23,8 +23,8 @@ defmodule MPEG.TS.SCTE35Test do
                  out_of_network_indicator: 1,
                  event_id_compliance_flag: 1,
                  splice_time: nil,
-                 break_duration: %{auto_return: 0, duration: 1_547_665_413},
-                 unique_program_id: 24064,
+                 break_duration: %{auto_return: 0, duration: 39_600_000},
+                 unique_program_id: 1374,
                  avail_num: 0,
                  avails_expected: 0
                },
@@ -50,17 +50,21 @@ defmodule MPEG.TS.SCTE35Test do
           event_id: 1_073_743_242,
           cancel_indicator: 0,
           out_of_network_indicator: 1,
+          program_splice_flag: 1,
+          duration_flag: 1,
+          splice_immediate_flag: 1,
           event_id_compliance_flag: 1,
           splice_time: nil,
-          break_duration: %{auto_return: 0, duration: 1_547_665_413},
-          unique_program_id: 24064,
+          break_duration: %{auto_return: 0, duration: 39_600_000},
+          unique_program_id: 1374,
           avail_num: 0,
           avails_expected: 0
         },
-        splice_descriptors: []
+        splice_descriptors: [],
+        e_crc32: <<>>
       }
 
-      assert MPEG.TS.Marshaler.marshal(marker) |> IO.iodata_to_binary() == Factory.scte35()
+      assert MPEG.TS.Marshaler.marshal(marker) == Factory.scte35()
     end
   end
 end
