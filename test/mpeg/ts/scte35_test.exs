@@ -23,7 +23,7 @@ defmodule MPEG.TS.SCTE35Test do
                  out_of_network_indicator: 1,
                  event_id_compliance_flag: 1,
                  splice_time: nil,
-                 break_duration: %{auto_return: 0, duration: 39_600_000},
+                 break_duration: %{auto_return: 0, duration: 440_000_000_000},
                  unique_program_id: 1374,
                  avail_num: 0,
                  avails_expected: 0
@@ -55,7 +55,7 @@ defmodule MPEG.TS.SCTE35Test do
           splice_immediate_flag: 1,
           event_id_compliance_flag: 1,
           splice_time: nil,
-          break_duration: %{auto_return: 0, duration: 39_600_000},
+          break_duration: %{auto_return: 0, duration: 440_000_000_000},
           unique_program_id: 1374,
           avail_num: 0,
           avails_expected: 0

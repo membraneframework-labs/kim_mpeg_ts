@@ -71,7 +71,7 @@ defmodule MPEG.TS.SCTE35 do
     defp parse_event_cancel_section(cmd, _), do: cmd
 
     defp parse_splice_time(0, <<1::1, 0b111111::6, pts_time::33, rest::binary>>),
-      do: {%{pts: pts_time}, rest}
+      do: {%{pts: MPEG.TS.convert_ts_to_ns(pts_time)}, rest}
 
     defp parse_splice_time(0, <<0::1, 0b1111111::7, rest::binary>>), do: {nil, rest}
     defp parse_splice_time(1, rest), do: {nil, rest}
@@ -80,7 +80,7 @@ defmodule MPEG.TS.SCTE35 do
            1,
            <<auto_return::1, 0b111111::6, duration::33, rest::binary>>
          ) do
-      {%{auto_return: auto_return, duration: duration}, rest}
+      {%{auto_return: auto_return, duration: MPEG.TS.convert_ts_to_ns(duration)}, rest}
     end
 
     defp parse_break_duration(0, rest), do: {nil, rest}
@@ -96,14 +96,14 @@ defmodule MPEG.TS.SCTE35 do
 
           splice_time =
             if cmd.program_splice_flag == 1 and cmd.splice_immediate_flag == 0,
-              do: <<1::1, 0b111111::6, cmd.splice_time.pts::33>>,
+              do: <<1::1, 0b111111::6, MPEG.TS.convert_ns_to_ts(cmd.splice_time.pts)::33>>,
               else: <<>>
 
           break_duration =
             if cmd.duration_flag == 1,
               do:
                 <<cmd.break_duration.auto_return::1, 0b111111::6,
-                  cmd.break_duration.duration::33>>,
+                  MPEG.TS.convert_ns_to_ts(cmd.break_duration.duration)::33>>,
               else: <<>>
 
           IO.iodata_to_binary([
