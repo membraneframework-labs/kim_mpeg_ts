@@ -71,13 +71,45 @@ defmodule MPEG.TS.Muxer do
   Mux the PAT table into a packet.
   """
   @spec mux_pat(t()) :: {Packet.t(), t()}
-  def mux_pat(muxer), do: mux_psi(@pat_pid, muxer)
+  def mux_pat(muxer) do
+    mux_psi(muxer, @pat_pid, %PSI{
+      header: psi_extended_header(0x00),
+      table: muxer.pat
+    })
+  end
 
   @doc """
   Mux the PMT table into a packet.
   """
   @spec mux_pmt(t()) :: {Packet.t(), t()}
-  def mux_pmt(muxer), do: mux_psi(@pmt_pid, muxer)
+  def mux_pmt(muxer) do
+    mux_psi(muxer, @pmt_pid, %PSI{
+      header: psi_extended_header(0x02),
+      table: muxer.pmt
+    })
+  end
+
+  @doc """
+  Mux a generic PSI into a packet.
+  """
+  @spec mux_psi(t(), Packet.pid_t(), MPEG.TS.PSI.t()) :: {Packet.t(), t()}
+  def mux_psi(muxer, pid, psi) do
+    continuity_counter = Map.fetch!(muxer.continuity_counters, pid)
+
+    packet =
+      psi
+      |> update_in([Access.key!(:table)], &Marshaler.marshal/1)
+      |> Marshaler.marshal()
+      |> Packet.new(
+        pid: pid,
+        pusi: true,
+        continuity_counter: continuity_counter,
+        random_access_indicator: false
+      )
+
+    continuity_counters = Map.update!(muxer.continuity_counters, pid, &rem(&1 + 1, @max_counter))
+    {packet, %{muxer | continuity_counters: continuity_counters}}
+  end
 
   @doc """
   Mux a PCR packet.
@@ -123,18 +155,6 @@ defmodule MPEG.TS.Muxer do
     {packets, %{muxer | continuity_counters: continuity_counters}}
   end
 
-  defp mux_psi(pid, state) do
-    table =
-      case pid do
-        @pat_pid -> state.pat
-        @pmt_pid -> state.pmt
-      end
-
-    psi_packet = psi_packet(pid, table, Map.fetch!(state.continuity_counters, pid))
-    continuity_counters = Map.update!(state.continuity_counters, pid, &rem(&1 + 1, @max_counter))
-    {psi_packet, %{state | continuity_counters: continuity_counters}}
-  end
-
   defp chunk_pes(pes, pid, sync?, send_pcr?, continuity_counter) do
     pes_data = Marshaler.marshal(pes)
     header_size = 8
@@ -162,25 +182,15 @@ defmodule MPEG.TS.Muxer do
     [{offset, size} | chunk({offset + size, @ts_payload_size}, remaining - size)]
   end
 
-  defp psi_packet(pid, table, continuity_counter) do
-    %PSI{
-      header: %{
-        table_id: if(pid == 0, do: 0x00, else: 0x02),
-        section_syntax_indicator: true,
-        transport_stream_id: 1,
-        version_number: 0,
-        current_next_indicator: true,
-        section_number: 0,
-        last_section_number: 0
-      },
-      table: Marshaler.marshal(table)
+  defp psi_extended_header(table_id) do
+    %{
+      table_id: table_id,
+      section_syntax_indicator: true,
+      transport_stream_id: 1,
+      version_number: 0,
+      current_next_indicator: true,
+      section_number: 0,
+      last_section_number: 0
     }
-    |> Marshaler.marshal()
-    |> Packet.new(
-      pid: pid,
-      pusi: true,
-      continuity_counter: continuity_counter,
-      random_access_indicator: false
-    )
   end
 end
