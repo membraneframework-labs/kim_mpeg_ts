@@ -216,6 +216,8 @@ defmodule MPEG.TS.PSI do
     @remaining_header_length 5
 
     def marshal(%{header: header, table: table}) do
+      table = MPEG.TS.Marshaler.marshal(table)
+
       section_length =
         if header.section_syntax_indicator,
           do: byte_size(table) + @remaining_header_length + @crc_length,
@@ -233,8 +235,6 @@ defmodule MPEG.TS.PSI do
         else
           <<>>
         end
-
-      table = MPEG.TS.Marshaler.marshal(table)
 
       payload = psi_header <> long_header <> table
       <<0, payload::binary, crc32(payload)::32>>
