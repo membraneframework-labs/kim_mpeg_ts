@@ -3,6 +3,7 @@ defmodule MPEG.TS.Demuxer do
   Responsible for demultiplexing a stream of MPEG.TS.Packet into the elemetary
   streams listed in the stream's Program Map Table. Does not yet handle PAT.
   """
+  alias MPEG.TS.SCTE35
   alias MPEG.TS.Packet
   alias MPEG.TS.{PMT, PAT, PES, PSI}
   alias MPEG.TS.StreamAggregator
@@ -217,7 +218,7 @@ defmodule MPEG.TS.Demuxer do
       container = %Container{
         pid: pkt.pid,
         payload: psi,
-        t: state.last_pts
+        t: psi_best_effort_timestamp(psi, state)
       }
 
       demux_packets(state, pkts, [container | acc])
@@ -266,6 +267,19 @@ defmodule MPEG.TS.Demuxer do
       end)
     end)
   end
+
+  defp psi_best_effort_timestamp(
+         %PSI{
+           table: %SCTE35{
+             pts_adjustment: offset,
+             splice_command: %SCTE35.SpliceInsert{splice_time: %{pts: pts}}
+           }
+         },
+         _state
+       ),
+       do: offset + pts
+
+  defp psi_best_effort_timestamp(_psi, state), do: state.last_pts
 
   defp parse_packets(buffer) do
     {ok, err} =
