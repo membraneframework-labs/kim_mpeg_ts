@@ -211,8 +211,7 @@ defmodule MPEG.TS.Packet do
          extension::9,
          rest::binary
        >>) do
-    pcr = base * 300 + extension
-    {pcr, rest}
+    {MPEG.TS.convert_ts_to_ns(base * 300 + extension), rest}
   end
 
   defimpl MPEG.TS.Marshaler do
@@ -272,6 +271,7 @@ defmodule MPEG.TS.Packet do
     defp serialize_pcr(nil), do: <<>>
 
     defp serialize_pcr(pcr) do
+      pcr = MPEG.TS.convert_ns_to_ts(pcr)
       <<div(pcr, 300)::33, 0b111111::6, rem(pcr, 300)::9>>
     end
 

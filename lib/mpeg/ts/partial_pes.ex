@@ -9,6 +9,7 @@ defmodule MPEG.TS.PartialPES do
   @type t :: %__MODULE__{
           data: binary(),
           stream_id: pos_integer(),
+          # In nanoseconds
           pts: pos_integer(),
           dts: pos_integer(),
           is_aligned: boolean(),

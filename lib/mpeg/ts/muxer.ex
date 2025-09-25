@@ -20,8 +20,6 @@ defmodule MPEG.TS.Muxer do
           pid_to_stream_id: %{required(Packet.pid_t()) => non_neg_integer()}
         }
 
-  @type timestamp :: non_neg_integer()
-
   defstruct [:pat, :pmt, :continuity_counters, :pid_to_stream_id]
 
   @doc """
@@ -121,7 +119,7 @@ defmodule MPEG.TS.Muxer do
   @doc """
   Mux a PCR packet.
   """
-  @spec mux_pcr(t(), timestamp()) :: {Packet.t(), t()}
+  @spec mux_pcr(t(), MPEG.TS.timestamp_ns()) :: {Packet.t(), t()}
   def mux_pcr(muxer, pcr) do
     pcr_pid = muxer.pmt.pcr_pid
     continuity_counter = Map.fetch!(muxer.continuity_counters, pcr_pid)
@@ -139,13 +137,15 @@ defmodule MPEG.TS.Muxer do
   The following optional options may be provided:
     * `:sync?` - whether the sample is a sync sample (keyframe). Default: `false`
     * `:send_pcr?` - whether to send a PCR with this sample. Default: `false`
-    * `:dts` - the decoding timestamp of the sample. Default: `nil`
+    * `:dts` - the decoding timestamp of the sample (in nanoseconds). Default: `nil`
+
+  Timestamps are in nanoseconds.
   """
   @spec mux_sample(
           t(),
           Packet.pid_t(),
           iodata(),
-          timestamp(),
+          MPEG.TS.timestamp_ns(),
           keyword()
         ) ::
           {[Packet.t()], t()}

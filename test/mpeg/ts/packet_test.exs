@@ -67,7 +67,7 @@ defmodule MPEG.TS.PacketTest do
           continuity_counter: 10,
           random_access_indicator: true,
           pusi: true,
-          pcr: 1000
+          pcr: MPEG.TS.convert_ts_to_ns(1000)
         )
 
       assert Marshaler.marshal(packet) |> IO.iodata_to_binary() == expected_payload

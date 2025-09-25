@@ -2,6 +2,7 @@ defmodule MPEG.TS.PES do
   @type t :: %__MODULE__{
           data: binary(),
           stream_id: 0..255,
+          # In nanoseconds
           pts: non_neg_integer() | nil,
           dts: non_neg_integer() | nil,
           is_aligned: boolean(),

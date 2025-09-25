@@ -34,7 +34,7 @@ defmodule MPEG.TS.Demuxer do
     @type payload_t :: PES.t() | PSI.t()
     @type t :: %__MODULE__{
             pid: MPEG.TS.Packet.pid_t(),
-            t: pos_integer(),
+            t: MPEG.TS.timestamp_ns(),
             payload: payload_t
           }
     defstruct [:pid, :t, :payload]
@@ -48,7 +48,7 @@ defmodule MPEG.TS.Demuxer do
           pending: binary(),
           # Tracks the last pts/dts value found. This is used to assign timing information to PSI
           # payloads, which might, or might not, carry it within their payloads.
-          last_pts: pos_integer(),
+          last_pts: MPEG.TS.timestamp_ns(),
           # Each PID that requires ES re-assemblement get's a queue here,
           # from which we extrac complete buffers.
           stream_aggregators: %{Packet.pid_t() => StreamAggregator.t()},
