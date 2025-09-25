@@ -52,6 +52,12 @@ defmodule MPEG.TS.Muxer do
       case stream_type do
         :video -> 0xE0 + streams_by_type
         :audio -> 0xC0 + streams_by_type
+        :subtitles -> 0xBD
+        :cues -> 0xBD
+        :data -> 0xBD
+        :ipmp -> 0xF0 + streams_by_type
+        :metadata -> 0xF0 + streams_by_type
+        :other -> 0xBD
       end
 
     new_streams =
