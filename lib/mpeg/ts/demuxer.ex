@@ -47,7 +47,7 @@ defmodule MPEG.TS.Demuxer do
           pending: binary(),
           # Tracks the last pts/dts value found. This is used to assign timing information to PSI
           # payloads, which might, or might not, carry it within their payloads.
-          last_t: pos_integer(),
+          last_pts: pos_integer(),
           # Each PID that requires ES re-assemblement get's a queue here,
           # from which we extrac complete buffers.
           stream_aggregators: %{Packet.pid_t() => StreamAggregator.t()},
@@ -64,7 +64,7 @@ defmodule MPEG.TS.Demuxer do
             stream_aggregators: %{},
             streams: %{},
             strict?: false,
-            last_t: 0
+            last_pts: 0
 
   @spec new() :: t()
   def new(opts \\ []) do
@@ -182,10 +182,16 @@ defmodule MPEG.TS.Demuxer do
         container = %Container{
           pid: pkt.pid,
           payload: x,
-          t: x.dts || x.pts
+          t: x.pts
         }
 
-        state = put_in(state, [Access.key!(:last_t)], x.dts || x.pts)
+        type = get_in(state, [Access.key(:streams, %{}), Access.key(pkt.pid, %{}), :stream_type])
+
+        state =
+          if PMT.get_stream_category(type) == :video,
+            do: put_in(state, [Access.key!(:last_pts)], x.pts),
+            else: state
+
         {[container | acc], state}
       end)
 
@@ -211,7 +217,7 @@ defmodule MPEG.TS.Demuxer do
       container = %Container{
         pid: pkt.pid,
         payload: psi,
-        t: state.last_t
+        t: state.last_pts
       }
 
       demux_packets(state, pkts, [container | acc])
@@ -220,7 +226,7 @@ defmodule MPEG.TS.Demuxer do
         if state.strict? do
           raise Error, %{reason: reason, data: pkt.payload}
         else
-          # Logger.warning("PID #{pkt.pid}: error: #{inspect(reason)}")
+          Logger.warning("PID #{pkt.pid}: error: #{inspect(reason)}")
           demux_packets(state, pkts, acc)
         end
     end
