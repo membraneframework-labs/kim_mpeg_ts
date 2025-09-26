@@ -65,7 +65,7 @@ defmodule MPEG.TS.Demuxer do
             stream_aggregators: %{},
             streams: %{},
             strict?: false,
-            last_pts: 0
+            last_pts: nil
 
   @spec new() :: t()
   def new(opts \\ []) do
