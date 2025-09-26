@@ -15,12 +15,14 @@ defmodule MPEG.TS.Muxer do
 
   @type t :: %__MODULE__{
           pat: PAT.t(),
+          pat_version: pos_integer(),
           pmt: PMT.t(),
+          pmt_version: pos_integer(),
           continuity_counters: %{required(Packet.pid_t()) => 0..15},
           pid_to_stream_id: %{required(Packet.pid_t()) => non_neg_integer()}
         }
 
-  defstruct [:pat, :pmt, :continuity_counters, :pid_to_stream_id]
+  defstruct [:pat, :pat_version, :pmt, :pmt_version, :continuity_counters, :pid_to_stream_id]
 
   @doc """
   Create a new muxer.
@@ -29,7 +31,9 @@ defmodule MPEG.TS.Muxer do
   def new() do
     %__MODULE__{
       pat: %PAT{programs: %{1 => @default_program_id}},
+      pat_version: 0,
       pmt: %PMT{},
+      pmt_version: 0,
       continuity_counters: %{@pat_pid => 0, @pmt_pid => 0},
       pid_to_stream_id: %{}
     }
@@ -66,6 +70,7 @@ defmodule MPEG.TS.Muxer do
     muxer = %__MODULE__{
       muxer
       | pmt: %{pmt | streams: new_streams, pcr_pid: if(pcr?, do: pid, else: pmt.pcr_pid)},
+        pmt_version: muxer.pmt_version + 1,
         continuity_counters: Map.put(muxer.continuity_counters, pid, 0),
         pid_to_stream_id: Map.put(muxer.pid_to_stream_id, pid, stream_id)
     }
@@ -79,7 +84,7 @@ defmodule MPEG.TS.Muxer do
   @spec mux_pat(t()) :: {Packet.t(), t()}
   def mux_pat(muxer) do
     mux_psi(muxer, @pat_pid, %PSI{
-      header: psi_extended_header(0x00),
+      header: psi_extended_header(0x00, muxer.pat_version),
       table: muxer.pat
     })
   end
@@ -90,7 +95,7 @@ defmodule MPEG.TS.Muxer do
   @spec mux_pmt(t()) :: {Packet.t(), t()}
   def mux_pmt(muxer) do
     mux_psi(muxer, @pmt_pid, %PSI{
-      header: psi_extended_header(0x02),
+      header: psi_extended_header(0x02, muxer.pmt_version),
       table: muxer.pmt
     })
   end
@@ -189,12 +194,12 @@ defmodule MPEG.TS.Muxer do
     [{offset, size} | chunk({offset + size, @ts_payload_size}, remaining - size)]
   end
 
-  defp psi_extended_header(table_id) do
+  defp psi_extended_header(table_id, version) do
     %{
       table_id: table_id,
       section_syntax_indicator: true,
       transport_stream_id: 1,
-      version_number: 0,
+      version_number: version,
       current_next_indicator: true,
       section_number: 0,
       last_section_number: 0
