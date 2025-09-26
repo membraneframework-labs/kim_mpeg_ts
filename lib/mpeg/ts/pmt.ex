@@ -58,9 +58,18 @@ defmodule MPEG.TS.PMT do
   defp parse_program_info(0, date), do: {:ok, {[], date}}
 
   defp parse_program_info(program_info_length, data) do
-    # TODO: implement parsing
-    <<_program_descriptors::binary-size(program_info_length), rest::binary>> = data
-    {:ok, {[], rest}}
+    <<program_descriptors::binary-size(program_info_length), rest::binary>> = data
+    {:ok, {parse_program_descriptors(program_descriptors, []), rest}}
+  end
+
+  defp parse_program_descriptors(<<>>, acc), do: Enum.reverse(acc)
+
+  defp parse_program_descriptors(
+         <<tag::8, length::8, data::binary-size(length), rest::binary>>,
+         acc
+       ) do
+    descriptor = %{tag: tag, data: data}
+    parse_program_descriptors(rest, [descriptor | acc])
   end
 
   defp parse_streams(data, acc \\ %{})
@@ -437,7 +446,13 @@ defmodule MPEG.TS.PMT do
           <<stream.stream_type_id::8, 0b111::3, pid::13, 0b1111::4, 0::12>>
         end)
 
-      <<0b111::3, pmt.pcr_pid || 0x1FFF::13, 0b1111::4, 0::12>> <> streams
+      descriptors =
+        Enum.map_join(pmt.program_info, fn %{tag: tag, data: data} ->
+          <<tag::8, byte_size(data)::8>> <> data
+        end)
+
+      <<0b111::3, pmt.pcr_pid || 0x1FFF::13, 0b1111::4, 0::2, byte_size(descriptors)::10>> <>
+        descriptors <> streams
     end
   end
 end

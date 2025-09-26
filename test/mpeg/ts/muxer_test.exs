@@ -21,7 +21,7 @@ defmodule MPEG.TS.MuxerTest do
     assert {:ok, %PSI{table: %PMT{pcr_pid: 0x1FFF, program_info: [], streams: %{}}}} =
              PSI.unmarshal(raw_psi, true)
 
-    {pid1, muxer} = Muxer.add_elementary_stream(muxer, :H264_AVC, true)
+    {pid1, muxer} = Muxer.add_elementary_stream(muxer, :H264_AVC, pcr?: true)
     {pid2, muxer} = Muxer.add_elementary_stream(muxer, :AAC_ADTS)
 
     assert pid1 == 0x100
@@ -44,12 +44,12 @@ defmodule MPEG.TS.MuxerTest do
   end
 
   test "Mux PCR", %{muxer: muxer} do
-    {pid, muxer} = Muxer.add_elementary_stream(muxer, :H264_AVC, true)
+    {pid, muxer} = Muxer.add_elementary_stream(muxer, :H264_AVC, pcr?: true)
     {%Packet{payload: <<>>, pcr: 100, pid: ^pid}, _muxer} = Muxer.mux_pcr(muxer, 100)
   end
 
   test "Mux sample", %{muxer: muxer} do
-    {pid, muxer} = Muxer.add_elementary_stream(muxer, :H264_AVC, true)
+    {pid, muxer} = Muxer.add_elementary_stream(muxer, :H264_AVC, pcr?: true)
 
     sample_payload = :binary.copy(<<1>>, 1000)
     pts = 90000
@@ -72,7 +72,9 @@ defmodule MPEG.TS.MuxerTest do
   end
 
   test "mux SCTE35", %{muxer: muxer} do
-    {pid, muxer} = Muxer.add_elementary_stream(muxer, :SCTE_35_SPLICE)
+    {pid, muxer} =
+      Muxer.add_elementary_stream(muxer, :SCTE_35_SPLICE, program_info: [%{tag: 5, data: "CUEI"}])
+
     table = Support.Factory.scte35()
 
     psi = %MPEG.TS.PSI{
@@ -87,7 +89,7 @@ defmodule MPEG.TS.MuxerTest do
 
     assert muxer.pmt == %MPEG.TS.PMT{
              pcr_pid: nil,
-             program_info: [],
+             program_info: [%{data: "CUEI", tag: 5}],
              streams: %{256 => %{stream_type: :SCTE_35_SPLICE, stream_type_id: 134}}
            }
 
@@ -96,7 +98,7 @@ defmodule MPEG.TS.MuxerTest do
 
   test "Mux and demux", %{muxer: muxer} do
     {video_pid, muxer} =
-      Muxer.add_elementary_stream(muxer, :H264_AVC, true)
+      Muxer.add_elementary_stream(muxer, :H264_AVC, pcr?: true)
 
     {audio_pid, muxer} = Muxer.add_elementary_stream(muxer, :AAC_ADTS)
 

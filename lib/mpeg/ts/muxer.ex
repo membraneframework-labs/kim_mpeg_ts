@@ -42,8 +42,14 @@ defmodule MPEG.TS.Muxer do
   @doc """
   Add a new elementary stream.
   """
-  @spec add_elementary_stream(t(), atom(), boolean()) :: {Packet.pid_t(), t()}
-  def add_elementary_stream(%__MODULE__{pmt: pmt} = muxer, stream_type, pcr? \\ false) do
+  @spec add_elementary_stream(t(), atom(), Keyword.t()) :: {Packet.pid_t(), t()}
+  def add_elementary_stream(%__MODULE__{pmt: pmt} = muxer, stream_type, opts \\ []) do
+    opts =
+      Keyword.validate!(opts,
+        pcr?: false,
+        program_info: []
+      )
+
     stream_size = map_size(pmt.streams)
     stream_type_id = PMT.encode_stream_type(stream_type)
     stream_category = PMT.get_stream_category_by_id(stream_type_id)
@@ -67,9 +73,16 @@ defmodule MPEG.TS.Muxer do
     new_streams =
       Map.put(pmt.streams, pid, %{stream_type_id: stream_type_id, stream_type: stream_type})
 
+    pmt = %PMT{
+      pmt
+      | streams: new_streams,
+        pcr_pid: if(opts[:pcr?], do: pid, else: pmt.pcr_pid),
+        program_info: pmt.program_info ++ opts[:program_info]
+    }
+
     muxer = %__MODULE__{
       muxer
-      | pmt: %{pmt | streams: new_streams, pcr_pid: if(pcr?, do: pid, else: pmt.pcr_pid)},
+      | pmt: pmt,
         pmt_version: muxer.pmt_version + 1,
         continuity_counters: Map.put(muxer.continuity_counters, pid, 0),
         pid_to_stream_id: Map.put(muxer.pid_to_stream_id, pid, stream_id)
