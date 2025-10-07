@@ -47,16 +47,19 @@ defmodule MPEG.TS.Muxer do
     opts =
       Keyword.validate!(opts,
         pcr?: false,
-        program_info: []
+        program_info: [],
+        pid: @start_pid + map_size(pmt.streams)
       )
 
-    stream_size = map_size(pmt.streams)
+    pid = opts[:pid]
+
+    if Map.has_key?(pmt.streams, pid) do
+      raise RuntimeError, "PID #{pid} is already present in PMT table"
+    end
+
     stream_type_id = PMT.encode_stream_type(stream_type)
     stream_category = PMT.get_stream_category_by_id(stream_type_id)
-
     streams_by_type = Enum.count(pmt.streams, fn {_pid, s} -> s.stream_type == stream_type end)
-
-    pid = @start_pid + stream_size
 
     stream_id =
       case stream_category do

@@ -73,7 +73,10 @@ defmodule MPEG.TS.MuxerTest do
 
   test "mux SCTE35", %{muxer: muxer} do
     {pid, muxer} =
-      Muxer.add_elementary_stream(muxer, :SCTE_35_SPLICE, program_info: [%{tag: 5, data: "CUEI"}])
+      Muxer.add_elementary_stream(muxer, :SCTE_35_SPLICE, [
+        program_info: [%{tag: 5, data: "CUEI"}],
+        pid: 500
+      ])
 
     table = Support.Factory.scte35()
 
@@ -90,7 +93,7 @@ defmodule MPEG.TS.MuxerTest do
     assert muxer.pmt == %MPEG.TS.PMT{
              pcr_pid: nil,
              program_info: [%{data: "CUEI", tag: 5}],
-             streams: %{256 => %{stream_type: :SCTE_35_SPLICE, stream_type_id: 134}}
+             streams: %{500 => %{stream_type: :SCTE_35_SPLICE, stream_type_id: 134}}
            }
 
     assert packet.payload != ""
