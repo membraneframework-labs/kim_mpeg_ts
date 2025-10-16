@@ -43,12 +43,11 @@ defmodule MPEG.TS.PartialPES do
   def unmarshal(data, false), do: {:ok, %__MODULE__{data: data}}
 
   @padding_stream_id 0xBE
-  @private_1_stream_id 0xBD
   @private_2_stream_id 0xBF
 
   @spec has_header?(pos_integer()) :: boolean()
   def has_header?(id)
-      when id in [@padding_stream_id, @private_1_stream_id, @private_2_stream_id],
+      when id in [@padding_stream_id, @private_2_stream_id],
       do: false
 
   def has_header?(_other), do: true
