@@ -1,7 +1,7 @@
 defmodule MPEG.TS.MuxerTest do
   use ExUnit.Case, async: true
 
-  alias MPEG.TS.{Demuxer, Marshaler, Muxer, Packet, PAT, PMT, PSI}
+  alias MPEG.TS.{Demuxer, Marshaler, Muxer, Packet, PAT, PMT, PSI, PES}
 
   setup do
     {:ok, muxer: Muxer.new()}
@@ -157,5 +157,86 @@ defmodule MPEG.TS.MuxerTest do
       assert sample.pts == sample.dts
       assert sample.stream_id == 0xC0
     end
+  end
+
+  @tag :tmp_dir
+  test "muxer correctly handles timestamp rollover conversion", %{tmp_dir: tmp_dir} do
+    output_path = Path.join(tmp_dir, "rollover_muxed.ts")
+
+    # Get original timestamps from input file
+    original_containers =
+      "test/data/rollover.ts"
+      |> Demuxer.stream_file!()
+      |> Stream.filter(fn
+        %{pid: 0x100, payload: %PES{}} -> true
+        _ -> false
+      end)
+      |> Enum.to_list()
+
+    assert length(original_containers) > 0
+
+    # Initialize muxer and setup streams
+    muxer = Muxer.new()
+    {video_pid, muxer} = Muxer.add_elementary_stream(muxer, :H264_AVC, pcr?: true)
+    assert video_pid == 0x100
+
+    # Mux PAT and PMT tables
+    {pat, muxer} = Muxer.mux_pat(muxer)
+    {pmt, muxer} = Muxer.mux_pmt(muxer)
+
+    # Process all containers and mux them
+    {packets, _muxer} =
+      original_containers
+      |> Enum.with_index()
+      |> Enum.reduce({[pat, pmt], muxer}, fn {container, idx}, {acc_packets, acc_muxer} ->
+        pes = container.payload
+
+        # Mark first frame as sync point
+        is_sync = idx == 0
+
+        {new_packets, new_muxer} =
+          Muxer.mux_sample(
+            acc_muxer,
+            video_pid,
+            pes.data,
+            pes.pts,
+            dts: pes.dts,
+            sync?: is_sync,
+            send_pcr?: true
+          )
+
+        {acc_packets ++ new_packets, new_muxer}
+      end)
+
+    # Write muxed packets to file
+    data = Marshaler.marshal(packets)
+    binary_data = data |> Enum.map(&IO.iodata_to_binary/1) |> IO.iodata_to_binary()
+    File.write!(output_path, binary_data)
+
+    # Get timestamps from muxed output file
+    output_containers =
+      output_path
+      |> Demuxer.stream_file!()
+      |> Stream.filter(fn
+        %{pid: 0x100, payload: %PES{}} -> true
+        _ -> false
+      end)
+      |> Enum.to_list()
+
+    assert length(output_containers) > 0
+    assert length(original_containers) == length(output_containers)
+
+    # Verify that original and output timestamps match exactly
+    Enum.zip(original_containers, output_containers)
+    |> Enum.each(fn {original, output} ->
+      assert original.payload.pts == output.payload.pts,
+             "PTS mismatch: original=#{original.payload.pts}, output=#{output.payload.pts}"
+
+      assert original.payload.dts == output.payload.dts,
+             "DTS mismatch: original=#{original.payload.dts}, output=#{output.payload.dts}"
+
+      assert original.t == output.t,
+             "Container timestamp mismatch: original=#{original.t}, output=#{output.t}"
+    end)
   end
 end
