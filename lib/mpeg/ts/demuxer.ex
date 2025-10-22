@@ -3,10 +3,13 @@ defmodule MPEG.TS.Demuxer do
   Responsible for demultiplexing a stream of MPEG.TS.Packet into the elemetary
   streams listed in the stream's Program Map Table. Does not yet handle PAT.
   """
-  alias MPEG.TS.SCTE35
   alias MPEG.TS.Packet
   alias MPEG.TS.{PMT, PAT, PES, PSI}
   alias MPEG.TS.StreamAggregator
+
+  # MPEG-TS 33-bit rollover period in nanoseconds
+  @rollover_period_ns round(2 ** 33 * (10 ** 9 / 90000))
+  @rollover_threshold div(@rollover_period_ns, 2)
 
   defmodule Error do
     defexception [:message]
@@ -46,9 +49,9 @@ defmodule MPEG.TS.Demuxer do
           # When enabled, raises on invalid packets.
           strict?: boolean(),
           pending: binary(),
-          # Tracks the last pts/dts value found. This is used to assign timing information to PSI
+          # Tracks the last dts value found. This is used to assign timing information to PSI
           # payloads, which might, or might not, carry it within their payloads.
-          last_pts: MPEG.TS.timestamp_ns(),
+          last_dts: MPEG.TS.timestamp_ns(),
           # Each PID that requires ES re-assemblement get's a queue here,
           # from which we extrac complete buffers.
           stream_aggregators: %{Packet.pid_t() => StreamAggregator.t()},
@@ -57,7 +60,9 @@ defmodule MPEG.TS.Demuxer do
           # stream_aggregators, if needed (i.e. they'r category is either audio or video).
           streams: %{Packet.pid_t() => PMT.stream_t()},
           # Reverse map of the PAT table, used for fast lookup
-          pids_with_pmt: %{Packet.pid_t() => PAT.program_id_t()}
+          pids_with_pmt: %{Packet.pid_t() => PAT.program_id_t()},
+          # Tracks timestamp rollover state per PID
+          rollover: %{Packet.pid_t() => %{pts: map(), dts: map()}}
         }
 
   defstruct pending: <<>>,
@@ -65,7 +70,8 @@ defmodule MPEG.TS.Demuxer do
             stream_aggregators: %{},
             streams: %{},
             strict?: false,
-            last_pts: nil
+            last_dts: nil,
+            rollover: %{}
 
   @spec new() :: t()
   def new(opts \\ []) do
@@ -119,35 +125,18 @@ defmodule MPEG.TS.Demuxer do
 
   @spec flush(t()) :: {[Container.t()], t()}
   def flush(state) do
-    state
-    |> put_in([Access.key!(:pending)], <<>>)
-    |> get_and_update_in([Access.key!(:stream_aggregators)], fn map ->
-      map
-      |> Enum.flat_map_reduce(map, fn {pid, aggregator}, map ->
-        {pes, aggregator} =
-          try do
-            StreamAggregator.flush(aggregator)
-          rescue
-            e in StreamAggregator.Error ->
-              unless state.strict? do
-                Logger.warning("PID #{pid} error: #{e.message}")
-                {[], StreamAggregator.new()}
-              else
-                reraise e, __STACKTRACE__
-              end
-          end
+    state = put_in(state, [Access.key!(:pending)], <<>>)
 
-        pes =
-          Enum.map(pes, fn x ->
-            %Container{
-              pid: pid,
-              payload: x,
-              t: x.dts || x.pts
-            }
-          end)
+    Enum.flat_map_reduce(state.stream_aggregators, state, fn {pid, aggregator}, acc_state ->
+      {pes, aggregator} = flush_aggregator(aggregator, acc_state.strict?, pid)
+      {containers, updated_state} = apply_rollover_correction(pes, pid, acc_state)
 
-        {pes, put_in(map, [pid], aggregator)}
-      end)
+      updated_state =
+        updated_state
+        |> put_in([Access.key!(:stream_aggregators), pid], aggregator)
+        |> update_last_dts_for_video(pid, containers)
+
+      {containers, updated_state}
     end)
   end
 
@@ -178,25 +167,10 @@ defmodule MPEG.TS.Demuxer do
         end
       end)
 
-    {acc, state} =
-      Enum.reduce(pes, {acc, state}, fn x, {acc, state} ->
-        container = %Container{
-          pid: pkt.pid,
-          payload: x,
-          t: x.pts
-        }
+    {containers, state} = apply_rollover_correction(pes, pkt.pid, state)
+    state = update_last_dts_for_video(state, pkt.pid, containers)
 
-        type = get_in(state, [Access.key(:streams, %{}), Access.key(pkt.pid, %{}), :stream_type])
-
-        state =
-          if PMT.get_stream_category(type) == :video,
-            do: put_in(state, [Access.key!(:last_pts)], x.pts),
-            else: state
-
-        {[container | acc], state}
-      end)
-
-    demux_packets(state, pkts, acc)
+    demux_packets(state, pkts, Enum.reverse(containers) ++ acc)
   end
 
   defp demux_packets(state, [pkt | pkts], acc)
@@ -215,11 +189,18 @@ defmodule MPEG.TS.Demuxer do
             state
         end
 
+      best_effort_t = state.last_dts
+      pid_rollover = Map.get(state.rollover, pkt.pid, %{pts: %{}})
+
+      {corrected_dts, updated_dts} = correct_timestamp(best_effort_t, pid_rollover.pts)
+
       container = %Container{
         pid: pkt.pid,
         payload: psi,
-        t: psi_best_effort_timestamp(psi, state)
+        t: corrected_dts
       }
+
+      state = put_in(state, [Access.key!(:rollover), pkt.pid], %{pts: updated_dts})
 
       demux_packets(state, pkts, [container | acc])
     else
@@ -268,19 +249,6 @@ defmodule MPEG.TS.Demuxer do
     end)
   end
 
-  defp psi_best_effort_timestamp(
-         %PSI{
-           table: %SCTE35{
-             pts_adjustment: offset,
-             splice_command: %SCTE35.SpliceInsert{splice_time: %{pts: pts}}
-           }
-         },
-         _state
-       ),
-       do: offset + pts
-
-  defp psi_best_effort_timestamp(_psi, state), do: state.last_pts
-
   defp parse_packets(buffer) do
     {ok, err} =
       buffer
@@ -313,5 +281,85 @@ defmodule MPEG.TS.Demuxer do
     ok = Enum.map(ok, fn {:ok, x} -> x end)
 
     {ok, to_buffer}
+  end
+
+  defp flush_aggregator(aggregator, strict?, pid) do
+    try do
+      StreamAggregator.flush(aggregator)
+    rescue
+      e in StreamAggregator.Error ->
+        unless strict? do
+          Logger.warning("PID #{pid} error: #{e.message}")
+          {[], StreamAggregator.new()}
+        else
+          reraise e, __STACKTRACE__
+        end
+    end
+  end
+
+  defp apply_rollover_correction(pes, pid, state) do
+    Enum.map_reduce(pes, state, fn x, acc_state ->
+      curr_rollover = Map.get(acc_state.rollover, pid, %{pts: %{}, dts: %{}})
+
+      {corrected_pts, updated_pts} = correct_timestamp(x.pts, curr_rollover.pts)
+      {corrected_dts, updated_dts} = correct_timestamp(x.dts, curr_rollover.dts)
+
+      corrected_x = %{x | pts: corrected_pts, dts: corrected_dts}
+
+      container = %Container{
+        pid: pid,
+        payload: corrected_x,
+        t: corrected_dts || corrected_pts
+      }
+
+      updated_state =
+        put_in(acc_state, [Access.key!(:rollover), pid], %{pts: updated_pts, dts: updated_dts})
+
+      {container, updated_state}
+    end)
+  end
+
+  defp update_last_dts_for_video(state, pid, containers) do
+    case get_in(state, [Access.key(:streams, %{}), Access.key(pid, %{}), :stream_type]) do
+      type when not is_nil(type) ->
+        if PMT.get_stream_category(type) == :video and containers != [] do
+          last_container = List.last(containers)
+          last_dts = last_container.payload.dts || last_container.payload.pts
+          put_in(state, [Access.key!(:last_dts)], last_dts)
+        else
+          state
+        end
+
+      _ ->
+        state
+    end
+  end
+
+  defp correct_timestamp(nil, ts_state) do
+    {nil, ts_state}
+  end
+
+  defp correct_timestamp(timestamp, ts_state) when ts_state != %{} do
+    %{last: last_ts, count: count} = ts_state
+
+    cond do
+      last_ts - timestamp > @rollover_threshold ->
+        new_count = count + 1
+        corrected_ts = timestamp + new_count * @rollover_period_ns
+        {corrected_ts, %{last: timestamp, count: new_count}}
+
+      timestamp - last_ts > @rollover_threshold and count > 0 ->
+        new_count = count - 1
+        corrected_ts = timestamp + new_count * @rollover_period_ns
+        {corrected_ts, %{last: timestamp, count: new_count}}
+
+      true ->
+        corrected_ts = timestamp + count * @rollover_period_ns
+        {corrected_ts, %{last: timestamp, count: count}}
+    end
+  end
+
+  defp correct_timestamp(timestamp, _ts_state) do
+    {timestamp, %{last: timestamp, count: 0}}
   end
 end
