@@ -22,8 +22,13 @@ defmodule MPEG.TS.StreamAggregator do
   @type t :: %__MODULE__{acc: :queue.queue(), rai?: boolean()}
   defstruct acc: :queue.new(), rai?: false
 
-  def new() do
-    %__MODULE__{}
+  def new(opts \\ []) do
+    opts =
+      Keyword.validate!(opts,
+        wait_for_rai: false
+      )
+
+    %__MODULE__{rai?: not opts[:wait_for_rai]}
   end
 
   def put_and_get(state = %{rai?: false}, %{random_access_indicator: false}) do
