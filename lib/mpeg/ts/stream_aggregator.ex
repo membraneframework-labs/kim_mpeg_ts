@@ -18,34 +18,31 @@ defmodule MPEG.TS.StreamAggregator do
     end
   end
 
-  @derive {Inspect, only: [:rai?]}
-  @type t :: %__MODULE__{acc: :queue.queue(), rai?: boolean()}
-  defstruct acc: :queue.new(), rai?: false
+  defstruct acc: :queue.new(), status: nil
 
   def new(opts \\ []) do
     opts = Keyword.validate!(opts, wait_rai?: true)
-    %__MODULE__{rai?: not opts[:wait_rai?]}
+    status = if opts[:wait_rai?], do: :wait_rai, else: :wait_pusi
+    %__MODULE__{status: status}
   end
 
-  def put_and_get(state = %{rai?: false}, %{random_access_indicator: false}) do
-    {[], state}
+  def put_and_get(state = %{status: status}, packet = %{random_access_indicator: true})
+      when status != :ready do
+    state
+    |> put_in([Access.key!(:status)], :ready)
+    |> put_and_get(packet)
   end
 
-  def put_and_get(state = %{rai?: false}, pkt) do
-    pes = unmarshal_partial_pes!(pkt)
-
-    state =
-      state
-      |> update_in([Access.key!(:acc)], fn q -> :queue.in(pes, q) end)
-      |> put_in([Access.key!(:rai?)], true)
-
-    {[], state}
+  def put_and_get(state = %{status: :wait_pusi}, packet = %{pusi: true}) do
+    state
+    |> put_in([Access.key!(:status)], :ready)
+    |> put_and_get(packet)
   end
 
   def put_and_get(state, pkt) do
     ppes = unmarshal_partial_pes!(pkt)
 
-    if pkt.pusi do
+    if pkt.pusi and not :queue.is_empty(state.acc) do
       get_and_update_in(state, [Access.key!(:acc)], fn acc ->
         pes =
           acc
