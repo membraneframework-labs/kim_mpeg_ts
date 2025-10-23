@@ -48,6 +48,8 @@ defmodule MPEG.TS.Demuxer do
   @type t :: %__MODULE__{
           # When enabled, raises on invalid packets.
           strict?: boolean(),
+          # If enabled, packets come out after the random access indicator has been found.
+          wait_rai?: boolean(),
           pending: binary(),
           # Tracks the last dts value found. This is used to assign timing information to PSI
           # payloads, which might, or might not, carry it within their payloads.
@@ -65,18 +67,21 @@ defmodule MPEG.TS.Demuxer do
           rollover: %{Packet.pid_t() => %{pts: map(), dts: map()}}
         }
 
-  defstruct pending: <<>>,
-            pids_with_pmt: %{},
-            stream_aggregators: %{},
-            streams: %{},
-            strict?: false,
-            last_dts: nil,
-            rollover: %{}
+  defstruct [
+    :strict?,
+    :wait_rai?,
+    pending: <<>>,
+    pids_with_pmt: %{},
+    stream_aggregators: %{},
+    streams: %{},
+    last_dts: nil,
+    rollover: %{}
+  ]
 
   @spec new() :: t()
   def new(opts \\ []) do
-    opts = Keyword.validate!(opts, strict?: false)
-    %__MODULE__{strict?: opts[:strict?]}
+    opts = Keyword.validate!(opts, strict?: false, wait_rai?: true)
+    %__MODULE__{strict?: opts[:strict?], wait_rai?: opts[:wait_rai?]}
   end
 
   def filter(units, pid) do
@@ -128,7 +133,7 @@ defmodule MPEG.TS.Demuxer do
     state = put_in(state, [Access.key!(:pending)], <<>>)
 
     Enum.flat_map_reduce(state.stream_aggregators, state, fn {pid, aggregator}, acc_state ->
-      {pes, aggregator} = flush_aggregator(aggregator, acc_state.strict?, pid)
+      {pes, aggregator} = flush_aggregator(aggregator, acc_state.strict?, pid, state)
       {containers, updated_state} = apply_rollover_correction(pes, pid, acc_state)
 
       updated_state =
@@ -160,7 +165,7 @@ defmodule MPEG.TS.Demuxer do
           e in StreamAggregator.Error ->
             unless state.strict? do
               Logger.warning("PID #{pkt.pid} error: #{e.message}")
-              {[], StreamAggregator.new()}
+              {[], StreamAggregator.new(wait_rai?: state.wait_rai?)}
             else
               reraise e, __STACKTRACE__
             end
@@ -242,7 +247,7 @@ defmodule MPEG.TS.Demuxer do
       end)
       |> Enum.reduce(state, fn {pid, _stream}, state ->
         update_in(state, [Access.key!(:stream_aggregators), pid], fn
-          nil -> StreamAggregator.new()
+          nil -> StreamAggregator.new(wait_rai?: state.wait_rai?)
           queue -> queue
         end)
       end)
@@ -283,14 +288,14 @@ defmodule MPEG.TS.Demuxer do
     {ok, to_buffer}
   end
 
-  defp flush_aggregator(aggregator, strict?, pid) do
+  defp flush_aggregator(aggregator, strict?, pid, state) do
     try do
       StreamAggregator.flush(aggregator)
     rescue
       e in StreamAggregator.Error ->
         unless strict? do
           Logger.warning("PID #{pid} error: #{e.message}")
-          {[], StreamAggregator.new()}
+          {[], StreamAggregator.new(wait_rai?: state.wait_rai?)}
         else
           reraise e, __STACKTRACE__
         end
