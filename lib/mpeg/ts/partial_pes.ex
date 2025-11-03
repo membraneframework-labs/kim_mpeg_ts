@@ -46,9 +46,9 @@ defmodule MPEG.TS.PartialPES do
   @private_2_stream_id 0xBF
 
   @spec has_header?(pos_integer()) :: boolean()
-  defp has_header?(id)
-       when id in [@padding_stream_id, @private_2_stream_id],
-       do: false
+  def has_header?(id)
+      when id in [@padding_stream_id, @private_2_stream_id],
+      do: false
 
   def has_header?(_other), do: true
 
