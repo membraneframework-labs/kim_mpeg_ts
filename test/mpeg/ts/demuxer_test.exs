@@ -2,135 +2,122 @@ defmodule MPEG.TS.DemuxerTest do
   use ExUnit.Case
 
   alias MPEG.TS.Demuxer
-  alias MPEG.TS.PES
-  alias MPEG.TS.Packet
 
-  @all_packets_path "./test/fixtures/reference/all.ts"
+  @broken "test/data/broken.ts"
+  @avsync "test/data/avsync.ts"
+  # NOTE: This test file was generated using the following ffmpeg command:
+  # ```bash
+  # ffmpeg -f lavfi -i "testsrc2=size=128x72:rate=1" -t 20 \
+  #    -c:v libx264 -preset veryslow -crf 42 -pix_fmt yuv420p \
+  #    -g 30 -bf 3 -sc_threshold 0 -x264-params "keyint=30:min-keyint=30:scenecut=0" \
+  #    -an \
+  #    -mpegts_copyts 1 \
+  #    -output_ts_offset 95433.7176889 \
+  #    -pat_period 1.0 -sdt_period 5.0 \
+  #    -f mpegts rollover.ts
+  # ```
+  @rollover "test/data/rollover.ts"
 
-  test "empty behaviour" do
-    state = Demuxer.new()
-    assert {[], state} = Demuxer.take(state, 2)
-    assert {[], _state} = Demuxer.take(state, 2, 1_000)
+  defp demux_file!(path, opts \\ []) do
+    path
+    |> Demuxer.stream_file!(opts)
+    |> Enum.into([])
   end
 
   test "finds PMT table" do
-    packets =
-      @all_packets_path
-      |> File.read!()
-      |> Packet.parse_valid()
+    units = demux_file!(@avsync)
 
-    %Demuxer{pmt: pmt} =
-      Demuxer.new()
-      |> Demuxer.push_packets(packets)
+    container =
+      Enum.find(units, fn
+        %{payload: %MPEG.TS.PSI{table_type: :pmt}} -> true
+        _ -> false
+      end)
 
     assert %MPEG.TS.PMT{
              pcr_pid: 256,
              program_info: [],
              streams: %{
-               256 => %{stream_type: :H264, stream_type_id: 27},
-               257 => %{stream_type: :MPEG1_AUDIO, stream_type_id: 3}
+               256 => %{stream_type: :H264_AVC, stream_type_id: 27},
+               257 => %{stream_type: :AAC_ADTS, stream_type_id: 15}
              }
-           } == pmt
+           } == container.payload.table
   end
 
   test "demuxes PES stream" do
-    packets =
-      @all_packets_path
-      |> File.read!()
-      |> Packet.parse_valid()
+    units = demux_file!(@avsync)
 
-    state =
-      Demuxer.new()
-      |> Demuxer.push_packets(packets)
+    count =
+      units
+      |> Enum.filter(fn %{payload: %mod{}} -> mod == MPEG.TS.PES end)
+      |> length()
 
-    assert {[%PES{}], _state} = Demuxer.take(state, 256, 1)
-  end
-
-  test "accepts raw bytes" do
-    bytes =
-      @all_packets_path
-      |> File.read!()
-
-    packets =
-      bytes
-      |> Packet.parse_valid()
-
-    state_from_packets =
-      Demuxer.new()
-      |> Demuxer.push_packets(packets)
-
-    state_from_bytes =
-      Demuxer.new()
-      |> Demuxer.push_buffer(bytes)
-
-    assert state_from_bytes == state_from_packets
-  end
-
-  test "sets discontinuity flag in PES" do
-    bytes =
-      @all_packets_path
-      |> File.read!()
-
-    state =
-      Demuxer.new()
-      |> Demuxer.push_buffer(bytes, true)
-
-    assert {packets, state} = Demuxer.take(state, 256, 6)
-    assert Enum.all?(packets, & &1.discontinuity)
-
-    state = Demuxer.push_buffer(state, bytes)
-    assert {[%PES{discontinuity: true}], state} = Demuxer.take(state, 256, 1)
-    assert {packets, _state} = Demuxer.take(state, 256, 5)
-    assert Enum.all?(packets, &(&1.discontinuity == false))
+    assert count > 0
   end
 
   test "works with partial data" do
-    one_shot =
-      Demuxer.new()
-      |> Demuxer.push_buffer(File.read!(@all_packets_path))
-      |> Demuxer.end_of_stream()
+    one_shot = demux_file!(@avsync)
 
     chunked =
-      @all_packets_path
+      @avsync
       |> File.open!([:binary])
       |> IO.binstream(512)
-      |> Enum.reduce(Demuxer.new(), fn buf, d -> Demuxer.push_buffer(d, buf) end)
-      |> Demuxer.end_of_stream()
+      |> Demuxer.stream!()
+      |> Enum.into([])
 
-    stream_id = 256
-    amount = 20_000
-    {packets_chunked, _state} = Demuxer.take(chunked, stream_id, amount)
-    {packets_one_shot, _state} = Demuxer.take(one_shot, stream_id, amount)
+    assert length(one_shot) > 0
+    assert length(chunked) == length(List.flatten(one_shot))
 
-    assert length(packets_chunked) == length(packets_one_shot)
-
-    packets_chunked
-    |> Enum.zip(packets_one_shot)
+    chunked
+    |> Enum.zip(one_shot)
     |> Enum.with_index()
-    |> Enum.each(fn {{chunked, one_shot}, index} ->
-      assert chunked == one_shot,
-             "packet #{index}/#{length(packets_chunked) - 1}:\n\tone_shot=#{inspect(one_shot, binaries: :as_strings)}\n\tchunked=#{inspect(chunked, binaries: :as_strings)}"
+    |> Enum.each(fn {{left, right}, index} ->
+      assert left == right,
+             "packet #{index}/#{length(chunked) - 1}:\n\tone_shot=#{inspect(right, binaries: :as_strings)}\n\tchunked=#{inspect(left, binaries: :as_strings)}"
     end)
   end
 
-  test "allows to take one packet at a time" do
-    get_packets = fn step ->
-      @all_packets_path
-      |> File.read!()
-      |> then(&Demuxer.push_buffer(Demuxer.new(), &1))
-      |> consume_demuxer(256, step, [])
+  test "raises on corrupted packets" do
+    assert_raise MPEG.TS.StreamAggregator.Error, fn ->
+      _ = demux_file!(@broken, strict?: true)
     end
-
-    assert get_packets.(1000) == get_packets.(1)
   end
 
-  defp consume_demuxer(state, stream_id, step, acc) do
-    {packets, state} = Demuxer.take(state, stream_id, step)
+  test "correctly handles the mpegts rollover and converts it into monotonic pts/dts" do
+    rollover_period_ns = round(2 ** 33 * (10 ** 9 / 90000))
 
-    if length(packets) == 0 do
-      acc
-    else
-      consume_demuxer(state, stream_id, step, acc ++ packets)
-    end
+    units = demux_file!(@rollover)
+
+    # Filter for PID 0x100 (256) which contains the H264 video stream
+    pes_units =
+      units
+      |> Enum.filter(fn
+        %{pid: 256, payload: %MPEG.TS.PES{}} -> true
+        _ -> false
+      end)
+
+    assert length(pes_units) > 0, "Expected to find PES units for PID 256"
+
+    # Verify timestamps are monotonically increasing and within expected bounds
+    pes_units
+    |> Enum.reduce(fn container, prev_container ->
+      pes = container.payload
+
+      # Assert that the timestamps are monotonically increasing
+      prev_pes = prev_container.payload
+      assert pes.dts > prev_pes.dts, "DTS should be monotonically increasing"
+
+      # Ensure that its a consistent timeline (within reasonable deltas)
+      assert_in_delta(pes.dts, prev_pes.dts, 1_000_000_000)
+      assert_in_delta(pes.pts, prev_pes.pts, 5_000_000_000)
+
+      # Ensure that we don't go above the rollover period (plus some margin)
+      assert pes.dts < rollover_period_ns + 60_000_000_000,
+             "DTS should not exceed rollover period + 1 minute"
+
+      assert pes.pts < rollover_period_ns + 60_000_000_000,
+             "PTS should not exceed rollover period + 1 minute"
+
+      container
+    end)
   end
 end

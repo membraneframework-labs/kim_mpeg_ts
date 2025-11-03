@@ -1,5 +1,5 @@
 defmodule MPEG.TS.PAT do
-  alias MPEG.TS.PSI
+  @behaviour MPEG.TS.Unmarshaler
 
   @moduledoc """
   Program Association Table.
@@ -7,32 +7,37 @@ defmodule MPEG.TS.PAT do
 
   @type program_id_t :: 0..65_535
   @type program_pid_t :: 0..8191
-  @type t :: %{required(program_id_t()) => program_pid_t()}
+  @type t :: %__MODULE__{
+          programs: %{required(program_id_t()) => program_pid_t()}
+        }
 
   @entry_length 4
 
-  def unmarshal(data, is_start_unit) do
-    with {:ok, %PSI{table: table}} <- PSI.unmarshal(data, is_start_unit),
-         {:ok, table} <- unmarshal_table(table) do
-      {:ok, table}
-    end
-  end
+  defstruct programs: %{}
 
   # Unmarshals Program Association Table data. Each entry should be 4 bytes
   # long. If provided data length is not divisible by entry length an error
   # shall be returned.
-  @spec unmarshal_table(binary) :: {:ok, t()} | {:error, :invalid_data}
-  def unmarshal_table(data) when rem(byte_size(data), @entry_length) == 0 do
+  @impl true
+  def unmarshal(data, true) when rem(byte_size(data), @entry_length) == 0 do
     programs =
       for <<program_number::16, _reserved::3, pid::13 <- data>>,
         into: %{} do
         {program_number, pid}
       end
 
-    {:ok, programs}
+    {:ok, %__MODULE__{programs: programs}}
   end
 
-  def unmarshal_table(_) do
+  def unmarshal(_, _) do
     {:error, :invalid_data}
+  end
+
+  defimpl MPEG.TS.Marshaler do
+    def marshal(%{programs: programs}) do
+      Enum.map_join(programs, fn {program_number, pid} ->
+        <<program_number::16, 0b111::3, pid::13>>
+      end)
+    end
   end
 end

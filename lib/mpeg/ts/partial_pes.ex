@@ -1,8 +1,6 @@
 defmodule MPEG.TS.PartialPES do
   @behaviour MPEG.TS.Unmarshaler
 
-  @ts_clock_hz 90_000
-
   @moduledoc """
   Partial Packetized Elemetary Stream. PES packets are much larger in size than
   TS packets are. This means that they have to be unmarshaled from a series of
@@ -11,6 +9,7 @@ defmodule MPEG.TS.PartialPES do
   @type t :: %__MODULE__{
           data: binary(),
           stream_id: pos_integer(),
+          # In nanoseconds
           pts: pos_integer(),
           dts: pos_integer(),
           is_aligned: boolean(),
@@ -20,19 +19,6 @@ defmodule MPEG.TS.PartialPES do
   defstruct [:data, :stream_id, :pts, :dts, :is_aligned, :discontinuity, :length]
 
   require Logger
-
-  @impl true
-  def is_unmarshable?(_data, false) do
-    true
-  end
-
-  def is_unmarshable?(<<1::24, _stream_id::8, _length::16, _optional::bitstring>>, true) do
-    true
-  end
-
-  def is_unmarshable?(_data, _true) do
-    false
-  end
 
   @impl true
   def unmarshal(
@@ -59,11 +45,12 @@ defmodule MPEG.TS.PartialPES do
   @padding_stream_id 0xBE
   @private_2_stream_id 0xBF
 
+  @spec has_header?(pos_integer()) :: boolean()
   defp has_header?(id)
        when id in [@padding_stream_id, @private_2_stream_id],
        do: false
 
-  defp has_header?(_other), do: true
+  def has_header?(_other), do: true
 
   defp parse_optional_header(data, false), do: {:ok, %{}, 0, data}
 
@@ -170,6 +157,6 @@ defmodule MPEG.TS.PartialPES do
     # interpreted as a binary and hence an integer.
     # PTS and DTS originate from a 90kHz clock.
     <<ts::40>> = <<0b0::7, chunk_one::bitstring, chunk_two::bitstring, chunk_three::bitstring>>
-    div(ts * 1_000_000_000, @ts_clock_hz)
+    MPEG.TS.convert_ts_to_ns(ts)
   end
 end

@@ -1,16 +1,22 @@
 defmodule MPEG.TS.PATTest do
   use ExUnit.Case
 
-  alias MPEG.TS.PAT
+  alias MPEG.TS.{Marshaler, PAT}
   alias Support.Factory
 
   describe "Program association table parser" do
     test "parses valid packet" do
-      assert {:ok, %{1 => 4096}} = PAT.unmarshal_table(Factory.pat())
+      assert {:ok, %PAT{programs: %{1 => 4096}}} = PAT.unmarshal(Factory.pat(), true)
     end
 
     test "returns an error when data is not valid" do
-      assert {:error, :invalid_data} = PAT.unmarshal_table(<<123, 32, 22, 121, 33>>)
+      assert {:error, :invalid_data} = PAT.unmarshal(<<123, 32, 22, 121, 33>>, true)
+    end
+  end
+
+  describe "Marshal program association table" do
+    test "marshals a PAT" do
+      assert Marshaler.marshal(%PAT{programs: %{1 => 4096}}) == Factory.pat()
     end
   end
 end

@@ -39,19 +39,24 @@ defmodule MPEG.TS.Packet do
            ]}
   defstruct [
     :payload,
-    :pusi,
     :pid,
     :pid_class,
     :continuity_counter,
-    :scrambling,
-    :discontinuity_indicator,
-    :random_access_indicator,
     :pcr,
+    pusi: false,
+    scrambling: :no,
+    discontinuity_indicator: false,
+    random_access_indicator: false,
     discontinuity: false
   ]
 
   @type parse_error_t ::
           :invalid_data | :invalid_packet | :unsupported_packet
+
+  @spec new(payload :: payload_t(), opts :: keyword()) :: t()
+  def new(payload, opts \\ []) do
+    struct(%__MODULE__{payload: payload}, opts)
+  end
 
   @spec parse(binary()) ::
           {:ok, t} | {:error, parse_error_t, binary()}
@@ -102,33 +107,13 @@ defmodule MPEG.TS.Packet do
   @spec parse_many(binary()) :: [{:error, parse_error_t(), binary()} | {:ok, t}]
   def parse_many(data), do: parse_many(data, [])
 
-  @spec parse_many!(binary()) :: [t]
-  def parse_many!(data) do
-    data
-    |> parse_many()
-    |> Enum.map(fn {:ok, x} -> x end)
-  end
-
-  @spec parse_valid(binary()) :: [t]
-  def parse_valid(data) do
-    data
-    |> parse_many()
-    |> Enum.filter(fn
-      {:ok, _} -> true
-      {:error, _, _} -> false
-    end)
-    |> Enum.map(fn {:ok, x} -> x end)
-  end
-
   defp parse_many(<<>>, acc), do: Enum.reverse(acc)
 
-  defp parse_many(<<packet::binary-@ts_packet_size, rest::binary>>, acc) do
-    parse_many(rest, [parse(packet) | acc])
-  end
+  defp parse_many(<<packet::binary-@ts_packet_size, rest::binary>>, acc),
+    do: parse_many(rest, [parse(packet) | acc])
 
-  defp parse_many(data, acc) when byte_size(data) < @ts_packet_size do
-    parse_many(<<>>, [parse(data) | acc])
-  end
+  defp parse_many(data, acc) when byte_size(data) < @ts_packet_size,
+    do: parse_many(<<>>, [parse(data) | acc])
 
   defp parse_adaptation_field_control(0b01), do: :payload
   defp parse_adaptation_field_control(0b10), do: :adaptation
@@ -149,7 +134,7 @@ defmodule MPEG.TS.Packet do
   defp parse_flag(0b0), do: false
 
   @spec parse_payload(binary(), adaptation_control_t(), pid_class_t()) ::
-          {:ok, Map.t(), bitstring()} | {:error, parse_error_t()}
+          {:ok, map(), bitstring()} | {:error, parse_error_t()}
   defp parse_payload(data, :adaptation, _) do
     with {:ok, adaptation} <- parse_adaptation_field(data) do
       {:ok, adaptation, <<>>}
@@ -226,7 +211,73 @@ defmodule MPEG.TS.Packet do
          extension::9,
          rest::binary
        >>) do
-    pcr = base * 300 + extension
-    {pcr, rest}
+    {MPEG.TS.convert_ts_to_ns(base * 300 + extension), rest}
+  end
+
+  defimpl MPEG.TS.Marshaler do
+    @ts_payload_size 184
+    @scrambling_control [no: 0, reserved: 1, even_key: 2, odd_key: 3]
+
+    def marshal(packet) do
+      adaptation = serialize_adaptation_field(packet)
+
+      adaptation_field_value =
+        cond do
+          adaptation != [] and byte_size(packet.payload) == 0 -> 2
+          adaptation != [] and byte_size(packet.payload) != 0 -> 3
+          true -> 1
+        end
+
+      [
+        0x47,
+        <<0::1, bool_to_int(packet.pusi)::1, 0::1, packet.pid::13,
+          @scrambling_control[packet.scrambling]::2, adaptation_field_value::2,
+          packet.continuity_counter::4>>,
+        adaptation,
+        packet.payload
+      ]
+    end
+
+    defp serialize_adaptation_field(packet) do
+      case adaptation_field_present?(packet) do
+        true ->
+          pcr_data = serialize_pcr(packet.pcr)
+          header_size = byte_size(pcr_data) + 2
+          stuffing_bytes = @ts_payload_size - byte_size(packet.payload) - header_size
+
+          [
+            header_size + stuffing_bytes - 1,
+            <<bool_to_int(packet.discontinuity_indicator)::1,
+              bool_to_int(packet.random_access_indicator)::1, 0::1,
+              bool_to_int(pcr_data != <<>>)::1, 0::4>>,
+            pcr_data,
+            filler_data(stuffing_bytes)
+          ]
+
+        false ->
+          case @ts_payload_size - byte_size(packet.payload) do
+            0 -> []
+            1 -> [0]
+            stuffing_bytes -> [stuffing_bytes - 1, 0, filler_data(stuffing_bytes - 2)]
+          end
+      end
+    end
+
+    defp adaptation_field_present?(%{discontinuity_indicator: true}), do: true
+    defp adaptation_field_present?(%{random_access_indicator: true}), do: true
+    defp adaptation_field_present?(%{pcr: nil}), do: false
+    defp adaptation_field_present?(_packet), do: true
+
+    defp serialize_pcr(nil), do: <<>>
+
+    defp serialize_pcr(pcr) do
+      pcr = MPEG.TS.convert_ns_to_ts(pcr)
+      <<div(pcr, 300)::33, 0b111111::6, rem(pcr, 300)::9>>
+    end
+
+    defp bool_to_int(true), do: 1
+    defp bool_to_int(_), do: 0
+
+    defp filler_data(times), do: :binary.copy(<<0xFF>>, times)
   end
 end
