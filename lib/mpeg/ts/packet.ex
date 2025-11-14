@@ -135,8 +135,8 @@ defmodule MPEG.TS.Packet do
 
   @spec parse_payload(binary(), adaptation_control_t(), pid_class_t()) ::
           {:ok, map(), bitstring()} | {:error, parse_error_t()}
-  defp parse_payload(data, :adaptation, _) do
-    with {:ok, adaptation} <- parse_adaptation_field(data) do
+  defp parse_payload(<<adaptation_field_length::8, adaptation_field::binary-size(adaptation_field_length), _rest::binary>>, :adaptation, _) do
+    with {:ok, adaptation} <- parse_adaptation_field(adaptation_field) do
       {:ok, adaptation, <<>>}
     end
   end
@@ -211,7 +211,10 @@ defmodule MPEG.TS.Packet do
          extension::9,
          rest::binary
        >>) do
-    {MPEG.TS.convert_ts_to_ns(base * 300 + extension), rest}
+    # PCR_base is in 90 kHz units, PCR_extension is in 27 MHz units
+    # Convert each part separately to avoid clock rate confusion
+    pcr_ns = MPEG.TS.convert_ts_to_ns(base) + round(extension * 1.0e9 / 27_000_000)
+    {pcr_ns, rest}
   end
 
   defimpl MPEG.TS.Marshaler do
@@ -271,8 +274,10 @@ defmodule MPEG.TS.Packet do
     defp serialize_pcr(nil), do: <<>>
 
     defp serialize_pcr(pcr) do
-      pcr = MPEG.TS.convert_ns_to_ts(pcr)
-      <<div(pcr, 300)::33, 0b111111::6, rem(pcr, 300)::9>>
+      # Convert nanoseconds to 27 MHz units
+      pcr_27mhz = round(pcr * 27_000_000 / 1.0e9)
+      # Split into base (90 kHz) and extension (27 MHz fractional part)
+      <<div(pcr_27mhz, 300)::33, 0b111111::6, rem(pcr_27mhz, 300)::9>>
     end
 
     defp bool_to_int(true), do: 1
