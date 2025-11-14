@@ -197,7 +197,7 @@ defmodule MPEG.TS.Demuxer do
       best_effort_t = state.last_dts
       pid_rollover = Map.get(state.rollover, pkt.pid, %{pts: %{}})
 
-      {corrected_dts, updated_dts} = correct_timestamp(best_effort_t, pid_rollover.pts)
+      {corrected_dts, updated_dts} = correct_timestamp(pkt.pid, best_effort_t, pid_rollover.pts)
 
       container = %Container{
         pid: pkt.pid,
@@ -306,8 +306,8 @@ defmodule MPEG.TS.Demuxer do
     Enum.map_reduce(pes, state, fn x, acc_state ->
       curr_rollover = Map.get(acc_state.rollover, pid, %{pts: %{}, dts: %{}})
 
-      {corrected_pts, updated_pts} = correct_timestamp(x.pts, curr_rollover.pts)
-      {corrected_dts, updated_dts} = correct_timestamp(x.dts, curr_rollover.dts)
+      {corrected_pts, updated_pts} = correct_timestamp(pid, x.pts, curr_rollover.pts)
+      {corrected_dts, updated_dts} = correct_timestamp(pid, x.dts, curr_rollover.dts)
 
       corrected_x = %{x | pts: corrected_pts, dts: corrected_dts}
 
@@ -340,22 +340,32 @@ defmodule MPEG.TS.Demuxer do
     end
   end
 
-  defp correct_timestamp(nil, ts_state) do
+  defp correct_timestamp(_pid, nil, ts_state) do
     {nil, ts_state}
   end
 
-  defp correct_timestamp(timestamp, ts_state) when ts_state != %{} do
+  defp correct_timestamp(pid, timestamp, ts_state) when ts_state != %{} do
     %{last: last_ts, count: count} = ts_state
 
     cond do
       last_ts - timestamp > @rollover_threshold ->
         new_count = count + 1
         corrected_ts = timestamp + new_count * @rollover_period_ns
+
+        Logger.info(
+          "MPEG.TS.Demuxer incrementing rollover count for #{pid} to #{new_count}. Corrected TS: #{corrected_ts}"
+        )
+
         {corrected_ts, %{last: timestamp, count: new_count}}
 
       timestamp - last_ts > @rollover_threshold and count > 0 ->
         new_count = count - 1
         corrected_ts = timestamp + new_count * @rollover_period_ns
+
+        Logger.info(
+          "MPEG.TS.Demuxer decrementing rollover count for #{pid} to #{new_count}. Corrected TS: #{corrected_ts}"
+        )
+
         {corrected_ts, %{last: timestamp, count: new_count}}
 
       true ->
@@ -364,7 +374,7 @@ defmodule MPEG.TS.Demuxer do
     end
   end
 
-  defp correct_timestamp(timestamp, _ts_state) do
+  defp correct_timestamp(_pid, timestamp, _ts_state) do
     {timestamp, %{last: timestamp, count: 0}}
   end
 end
