@@ -179,7 +179,7 @@ defmodule MPEG.TS.Demuxer do
   end
 
   defp demux_packets(state, [pkt | pkts], acc)
-       when pkt.pid_class in [:pat, :psi] or is_map_key(state.pids_with_pmt, pkt.pid) do
+       when pkt.pid_class in [:psi, :pat] or is_map_key(state.pids_with_pmt, pkt.pid) do
     with {:ok, psi} <- PSI.unmarshal(pkt.payload, pkt.pusi) do
       state =
         cond do

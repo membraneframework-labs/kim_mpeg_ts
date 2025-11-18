@@ -126,9 +126,7 @@ defmodule MPEG.TS.Packet do
   defp parse_scrambling_control(0b11), do: :odd_key
 
   defp parse_pid_class(0x0000), do: :pat
-  # defp parse_pid_class(id) when id in 0x0020..0x1FFA or id in 0x1FFC..0x1FFE, do: :psi
-  defp parse_pid_class(4096), do: :psi
-  defp parse_pid_class(17), do: :psi
+  defp parse_pid_class(id) when id in 0x0020..0x1FFA or id in 0x1FFC..0x1FFE, do: :psi
   defp parse_pid_class(0x1FFF), do: :null_packet
   defp parse_pid_class(_), do: :unsupported
 
@@ -172,7 +170,6 @@ defmodule MPEG.TS.Packet do
   # <<table_id::8, 1::1, 0::1, 3::2, 0::2, section_length::10, table_id_ext::16, 3::2,
   #   version::5, active::1, section::8, last_section::8, rest::bitstring>>,
   defp parse_payload(payload, :payload, :pat), do: {:ok, %{}, payload}
-  defp parse_payload(payload, :payload, :unsupported), do: {:ok, %{}, payload}
   defp parse_payload(_, _, _), do: {:error, :unsupported_packet}
 
   defp parse_adaptation_field(<<>>) do
