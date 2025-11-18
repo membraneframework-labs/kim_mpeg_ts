@@ -179,7 +179,7 @@ defmodule MPEG.TS.Demuxer do
   end
 
   defp demux_packets(state, [pkt | pkts], acc)
-       when pkt.pid_class in [:psi, :pat] or is_map_key(state.pids_with_pmt, pkt.pid) do
+       when pkt.pid_class in [:pat, :psi] or is_map_key(state.pids_with_pmt, pkt.pid) do
     with {:ok, psi} <- PSI.unmarshal(pkt.payload, pkt.pusi) do
       state =
         cond do
@@ -221,7 +221,7 @@ defmodule MPEG.TS.Demuxer do
 
   defp demux_packets(state, [pkt | pkts], acc) do
     # This packet does not belong to any PES stream we know -- it might be
-    # an unknown stream (we did not receive PMTs yet) or a PSI stream. 
+    # an unknown stream (we did not receive PMTs yet) or a PSI stream.
     Logger.warning("Unexpected packet received: #{inspect(pkt)}")
     demux_packets(state, pkts, acc)
   end
@@ -243,7 +243,7 @@ defmodule MPEG.TS.Demuxer do
       # Each stream that contains a PES stream should have its aggregator.
       state.streams
       |> Enum.filter(fn {_pid, stream} ->
-        PMT.get_stream_category(stream.stream_type) in [:audio, :video]
+        PMT.get_stream_category(stream.stream_type) in [:audio, :video, :metadata]
       end)
       |> Enum.reduce(state, fn {pid, _stream}, state ->
         update_in(state, [Access.key!(:stream_aggregators), pid], fn
